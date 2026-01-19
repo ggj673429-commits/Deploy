@@ -58,13 +58,9 @@ class APIv1Settings(BaseSettings):
     # ==================== ENVIRONMENT ====================
     env: str = "development"  # development | staging | production
     
-    # ==================== DATABASE ====================
-    database_url: str = "postgresql://postgres:postgres@localhost:5432/portal_db"
-    
-    # Database pool configuration (configurable via env)
-    db_pool_min: int = 2
-    db_pool_max: int = 10
-    db_command_timeout: int = 60
+    # ==================== DATABASE (MongoDB) ====================
+    mongo_url: str = "mongodb://localhost:27017"
+    db_name: str = "gaming_platform"
     
     # ==================== JWT Settings ====================
     # DEV DEFAULT: Insecure placeholder - MUST be overridden in production
