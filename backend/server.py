@@ -292,7 +292,7 @@ async def health_check():
         "status": "healthy",
         "message": "Gaming Platform API v1",
         "version": "1.0.0",
-        "database": "PostgreSQL"
+        "database": "MongoDB"
     }
 
 
@@ -306,7 +306,7 @@ async def health_check_v1():
         "status": "healthy",
         "message": "Gaming Platform API v1",
         "version": "1.0.0",
-        "database": "PostgreSQL"
+        "database": "MongoDB"
     }
 
 
