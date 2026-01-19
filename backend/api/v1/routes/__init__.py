@@ -85,6 +85,7 @@ api_v1_router.include_router(withdrawal_router)  # Withdrawals (Payment OUT)
 api_v1_router.include_router(game_account_router)  # Game accounts
 api_v1_router.include_router(credit_router)  # Welcome credits
 api_v1_router.include_router(promotions_router)  # Promotions & banners
+api_v1_router.include_router(chatwoot_router)  # Chatwoot integration
 
 # Include feature-flagged routers (if enabled)
 if admin_router:
