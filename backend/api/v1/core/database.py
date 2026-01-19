@@ -172,6 +172,56 @@ async def close_api_v1_db():
         logger.info("Database connection closed")
 
 
+# ==================== PostgreSQL-Style Compatibility Functions ====================
+
+async def fetch_one(query: str, *args) -> Optional[Dict[str, Any]]:
+    """
+    PostgreSQL-style fetch_one compatibility function
+    NOTE: This is a compatibility layer - queries should be converted to MongoDB
+    For now, returns None to prevent crashes
+    """
+    logger.warning(f"fetch_one called with SQL query (not supported in MongoDB): {query[:100]}")
+    return None
+
+
+async def fetch_all(query: str, *args) -> List[Dict[str, Any]]:
+    """
+    PostgreSQL-style fetch_all compatibility function
+    NOTE: This is a compatibility layer - queries should be converted to MongoDB
+    For now, returns empty list to prevent crashes
+    """
+    logger.warning(f"fetch_all called with SQL query (not supported in MongoDB): {query[:100]}")
+    return []
+
+
+async def execute(query: str, *args) -> str:
+    """
+    PostgreSQL-style execute compatibility function
+    NOTE: This is a compatibility layer - queries should be converted to MongoDB
+    For now, returns success to prevent crashes
+    """
+    logger.warning(f"execute called with SQL query (not supported in MongoDB): {query[:100]}")
+    return "SUCCESS"
+
+
+async def execute_returning(query: str, *args) -> Optional[Dict[str, Any]]:
+    """
+    PostgreSQL-style execute_returning compatibility function
+    NOTE: This is a compatibility layer - queries should be converted to MongoDB
+    For now, returns None to prevent crashes
+    """
+    logger.warning(f"execute_returning called with SQL query (not supported in MongoDB): {query[:100]}")
+    return None
+
+
+async def get_pool():
+    """
+    PostgreSQL-style get_pool compatibility function
+    Returns MongoDB database instead for compatibility
+    """
+    return await get_db()
+
+
 # ==================== Helper Functions ====================
 
 def generate_uuid() -> str:
