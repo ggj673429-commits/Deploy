@@ -33,6 +33,7 @@ from .withdrawal_routes import router as withdrawal_router  # Withdrawals
 from .game_account_routes import router as game_account_router  # Game account management
 from .credit_routes import router as credit_router  # Welcome credits
 from .promotions_routes import router as promotions_router  # Promotions & banners
+from .chatwoot_routes import router as chatwoot_router  # Chatwoot integration
 
 # Feature-flagged routes (can be disabled via env)
 # Bot routes
