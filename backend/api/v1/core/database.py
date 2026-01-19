@@ -375,6 +375,7 @@ def create_transaction_doc(
 # Export main functions
 __all__ = [
     "get_db",
+    "get_pool",
     "init_api_v1_db",
     "close_api_v1_db",
     "generate_uuid",
@@ -386,5 +387,9 @@ __all__ = [
     "serialize_docs",
     "create_user_doc",
     "create_order_doc",
-    "create_transaction_doc"
+    "create_transaction_doc",
+    "fetch_one",
+    "fetch_all",
+    "execute",
+    "execute_returning"
 ]
