@@ -11,7 +11,6 @@ import bcrypt
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, Dict, Any
 from jose import JWTError, jwt
-import asyncpg
 from .config import get_api_settings, ErrorCodes
 
 settings = get_api_settings()
