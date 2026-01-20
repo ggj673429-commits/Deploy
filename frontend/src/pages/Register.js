@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
-import { UserPlus, Eye, EyeOff, Mail, User, Lock, Gift, AlertCircle } from 'lucide-react';
+import { UserPlus, Eye, EyeOff, User, Lock, Gift, AlertCircle } from 'lucide-react';
 
 const Register = () => {
   const navigate = useNavigate();
@@ -10,7 +10,6 @@ const Register = () => {
   const { register: registerUser } = useAuth();
   
   const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [referralCode, setReferralCode] = useState('');
@@ -18,7 +17,7 @@ const Register = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Auto-fill referral code from URL query parameter
+  // Auto-fill referral code from URL query parameter (trim + uppercase on prefill only)
   useEffect(() => {
     const refParam = searchParams.get('ref');
     if (refParam) {
@@ -43,12 +42,12 @@ const Register = () => {
     setLoading(true);
     
     try {
-      // Use AuthContext.register which calls the correct API
+      // Normalize referral code on submit (trim + uppercase)
       const normalizedReferralCode = referralCode.trim().toUpperCase();
       const result = await registerUser(
         username, 
         password, 
-        email || username,  // displayName
+        username,  // displayName - use username as display name
         normalizedReferralCode || null
       );
       
@@ -94,7 +93,6 @@ const Register = () => {
               <ul className="text-xs text-blue-400 space-y-1">
                 <li>• Username: 3-50 characters, alphanumeric & underscore</li>
                 <li>• Password: Minimum 8 characters</li>
-                <li>• Email: Optional but recommended for recovery</li>
               </ul>
             </div>
           </div>
@@ -124,25 +122,6 @@ const Register = () => {
             <p className="text-xs text-gray-500 mt-1">3-50 characters, letters, numbers & underscore</p>
           </div>
 
-          {/* Email */}
-          <div>
-            <label className="block text-sm font-medium text-gray-400 mb-2">
-              Email (Optional)
-            </label>
-            <div className="relative">
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 pl-11 bg-black border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 transition-colors"
-                placeholder="your.email@example.com"
-                data-testid="register-email"
-              />
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-            </div>
-            <p className="text-xs text-gray-500 mt-1">For account recovery and notifications</p>
-          </div>
-
           {/* Password */}
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-2">
@@ -164,6 +143,7 @@ const Register = () => {
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-300"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
@@ -192,6 +172,7 @@ const Register = () => {
                 type="button"
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-300"
+                aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
               >
                 {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
@@ -207,7 +188,7 @@ const Register = () => {
               <input
                 type="text"
                 value={referralCode}
-                onChange={(e) => setReferralCode(e.target.value.trim().toUpperCase())}
+                onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
                 className="w-full px-4 py-3 pl-11 bg-black border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 transition-colors"
                 placeholder="Enter referral code"
                 data-testid="register-referral"
