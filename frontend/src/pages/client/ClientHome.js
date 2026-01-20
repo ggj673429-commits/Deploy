@@ -266,19 +266,21 @@ const ClientHome = () => {
             </div>
           ) : (
             <div className="space-y-2">
-              {recentOrders.slice(0, 5).map(order => (
+              {recentOrders.slice(0, 5).map(order => {
+                const orderId = getEntityId(order);
+                const orderIsIncoming = isIncoming(order);
+                return (
                 <button
-                  key={order.order_id}
-                  onClick={() => navigate(`/client/wallet/transaction/${order.order_id}`)}
+                  key={orderId}
+                  onClick={() => orderId && navigate(`/client/wallet/transaction/${order.order_id || orderId}`)}
                   className="w-full flex items-center justify-between p-4 bg-white/[0.02] border border-white/5 rounded-xl hover:bg-white/[0.04] transition-all text-left"
+                  disabled={!orderId}
                 >
                   <div className="flex items-center gap-3">
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                      order.order_type?.includes('load') || order.order_type?.includes('deposit')
-                        ? 'bg-emerald-500/10'
-                        : 'bg-red-500/10'
+                      orderIsIncoming ? 'bg-emerald-500/10' : 'bg-red-500/10'
                     }`}>
-                      {order.order_type?.includes('load') || order.order_type?.includes('deposit') ? (
+                      {orderIsIncoming ? (
                         <ArrowDownLeft className="w-5 h-5 text-emerald-400" />
                       ) : (
                         <ArrowUpRight className="w-5 h-5 text-red-400" />
@@ -289,31 +291,24 @@ const ClientHome = () => {
                         {order.order_type?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'Transaction'}
                       </p>
                       <p className="text-xs text-gray-500">
-                        {order.game_name?.toUpperCase() || order.status?.replace(/_/g, ' ')}
+                        {order.game_name?.toUpperCase() || normStatus(order.status).replace(/_/g, ' ')}
                       </p>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className={`font-semibold ${
-                      order.order_type?.includes('load') || order.order_type?.includes('deposit')
-                        ? 'text-emerald-400'
-                        : 'text-red-400'
-                    }`}>
-                      {order.order_type?.includes('load') || order.order_type?.includes('deposit') ? '+' : '-'}
-                      ${order.amount?.toFixed(2) || '0.00'}
+                    <p className={`font-semibold ${orderIsIncoming ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {orderIsIncoming ? '+' : '-'}${toMoney(order.amount)}
                     </p>
                     <p className={`text-xs ${
-                      order.status === 'approved' || order.status === 'completed'
-                        ? 'text-emerald-500'
-                        : order.status === 'pending' || order.status === 'pending_approval'
-                        ? 'text-amber-500'
-                        : 'text-red-500'
+                      isCompletedStatus(order.status) ? 'text-emerald-500' :
+                      isPendingStatus(order.status) ? 'text-amber-500' : 'text-red-500'
                     }`}>
-                      {order.status?.replace(/_/g, ' ')}
+                      {normStatus(order.status).replace(/_/g, ' ')}
                     </p>
                   </div>
                 </button>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
