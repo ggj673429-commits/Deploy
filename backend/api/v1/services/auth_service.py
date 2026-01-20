@@ -317,10 +317,13 @@ async def validate_token(token: str) -> Tuple[bool, Dict[str, Any]]:
 
 async def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
     """Get user by username"""
-    return await fetch_one(
-        "SELECT user_id, username, display_name, referral_code, is_active FROM users WHERE username = $1",
-        username.lower()
+    from ..core.database import get_db, serialize_doc
+    db = await get_db()
+    user = await db.users.find_one(
+        {"username": username.lower()},
+        {"user_id": 1, "username": 1, "display_name": 1, "referral_code": 1, "is_active": 1}
     )
+    return serialize_doc(user)
 
 
 async def log_audit(
