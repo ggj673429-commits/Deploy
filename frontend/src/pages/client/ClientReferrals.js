@@ -198,9 +198,22 @@ const ClientReferrals = () => {
     fetchReferralData();
   }, [fetchReferralData]);
 
+  // Centralized referral link helper - ensures no undefined in link
+  const getReferralLink = useCallback(() => {
+    const code = referralData?.referral_code || user?.referral_code;
+    if (!code || code === 'undefined' || code === 'null') {
+      return `${window.location.origin}/register`;
+    }
+    return referralData?.referral_link || `${window.location.origin}/register?ref=${code}`;
+  }, [referralData, user]);
+
+  // Centralized referral code helper
+  const getReferralCode = useCallback(() => {
+    return referralData?.referral_code || user?.referral_code || 'N/A';
+  }, [referralData, user]);
+
   const handleCopyLink = useCallback(() => {
-    const link = referralData?.referral_link || 
-      `${window.location.origin}/register?ref=${referralData?.referral_code || user?.referral_code || 'DEMO'}`;
+    const link = getReferralLink();
     
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(link).then(() => {
@@ -226,21 +239,19 @@ const ClientReferrals = () => {
       }
       document.body.removeChild(textArea);
     }
-  }, [referralData, user]);
+  }, [getReferralLink]);
 
-  const handleShareTelegram = () => {
-    const link = referralData?.referral_link || 
-      `${window.location.origin}/register?ref=${referralData?.referral_code}`;
+  const handleShareTelegram = useCallback(() => {
+    const link = getReferralLink();
     const text = encodeURIComponent(`Join me and get a bonus! Use my referral link: ${link}`);
     window.open(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`, '_blank');
-  };
+  }, [getReferralLink]);
 
-  const handleShareWhatsApp = () => {
-    const link = referralData?.referral_link || 
-      `${window.location.origin}/register?ref=${referralData?.referral_code}`;
+  const handleShareWhatsApp = useCallback(() => {
+    const link = getReferralLink();
     const text = encodeURIComponent(`Join me and get a bonus! Use my referral link: ${link}`);
     window.open(`https://wa.me/?text=${text}`, '_blank');
-  };
+  }, [getReferralLink]);
 
   // Safe number formatting
   const formatCurrency = (value) => {
