@@ -117,57 +117,83 @@ class ApprovalAction(BaseModel):
 
 @router.get("/dashboard", summary="Dashboard overview - read-only")
 async def get_dashboard(request: Request, authorization: str = Header(...)):
-    """Quick health check overview ONLY - Uses MongoDB"""
-    from ..core.database import get_db
+    """
+    Dashboard Overview - Uses MongoDB with client timezone support
     
+    Business Definitions:
+    - Today = client device local day (via X-Client-Timezone header)
+    - Deposits In = SUM of game_load.amount where approved_at in today
+    - Withdrawals Out = SUM of withdrawal_game.payout_amount where approved_at in today
+    - Net Profit = deposits - withdrawals - referral_earnings_paid
+    - Active Clients = count users with role='user' and is_active=True
+    - Cash Balance = SUM of all clients' withdrawable cash balance
+    """
     auth = await require_admin_access(request, authorization)
     
     db = await get_db()
     
-    # Get today's date range
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    # Get today's date range in client timezone (converted to UTC)
+    today_start, today_end = get_client_today_range(request)
     
     # Pending approvals using MongoDB
-    pending_statuses = ['pending_review', 'awaiting_payment_proof', 'pending', 'initiated']
+    pending_statuses = ['pending_review', 'awaiting_payment_proof', 'pending', 'initiated', 'PENDING_REVIEW']
     pending_total = await db.orders.count_documents({"status": {"$in": pending_statuses}})
     pending_deposits = await db.orders.count_documents({
         "status": {"$in": pending_statuses},
-        "order_type": {"$in": ["deposit", "wallet_load"]}
+        "order_type": {"$in": ["deposit", "wallet_load", "game_load"]}
     })
     pending_withdrawals = await db.orders.count_documents({
         "status": {"$in": pending_statuses},
-        "order_type": {"$in": ["withdrawal", "wallet_redeem"]}
+        "order_type": {"$in": ["withdrawal", "wallet_redeem", "withdrawal_game"]}
     })
     
-    # Today's flow using MongoDB aggregation
-    approved_statuses = ['approved', 'APPROVED_EXECUTED', 'completed']
+    # Approved statuses
+    approved_statuses = ['approved', 'APPROVED_EXECUTED', 'completed', 'paid']
     
+    # TODAY'S MONEY FLOW (A) - Using approved_at in client's local day
+    # Deposits In Today = SUM of game_load amount
     deposits_pipeline = [
         {"$match": {
-            "order_type": {"$in": ["deposit", "wallet_load"]},
+            "order_type": {"$in": ["game_load", "deposit", "wallet_load"]},
             "status": {"$in": approved_statuses},
-            "approved_at": {"$gte": today_start}
+            "approved_at": {"$gte": today_start, "$lte": today_end}
         }},
         {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
     ]
     deposits_result = await db.orders.aggregate(deposits_pipeline).to_list(1)
-    deposits_in = deposits_result[0]["total"] if deposits_result else 0
+    deposits_in_today = deposits_result[0]["total"] if deposits_result else 0
     
+    # Withdrawals Out Today = SUM of withdrawal_game payout_amount
     withdrawals_pipeline = [
         {"$match": {
-            "order_type": {"$in": ["withdrawal", "wallet_redeem"]},
+            "order_type": {"$in": ["withdrawal_game", "withdrawal", "wallet_redeem"]},
             "status": {"$in": approved_statuses},
-            "approved_at": {"$gte": today_start}
+            "approved_at": {"$gte": today_start, "$lte": today_end}
         }},
         {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$payout_amount", "$amount"]}}}}
     ]
     withdrawals_result = await db.orders.aggregate(withdrawals_pipeline).to_list(1)
-    withdrawals_out = withdrawals_result[0]["total"] if withdrawals_result else 0
+    withdrawals_out_today = withdrawals_result[0]["total"] if withdrawals_result else 0
     
+    # Referral Earnings Paid Today
+    referral_earnings_pipeline = [
+        {"$match": {
+            "status": {"$in": ["paid", "credited", "completed"]},
+            "created_at": {"$gte": today_start, "$lte": today_end}
+        }},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]
+    referral_earnings_result = await db.referral_earnings.aggregate(referral_earnings_pipeline).to_list(1)
+    referral_earnings_today = referral_earnings_result[0]["total"] if referral_earnings_result else 0
+    
+    # Net Profit Today = deposits - withdrawals - referral_earnings
+    net_profit_today = float(deposits_in_today or 0) - float(withdrawals_out_today or 0) - float(referral_earnings_today or 0)
+    
+    # Voided Today (redemption-time voids)
     voided_pipeline = [
         {"$match": {
             "status": {"$in": approved_statuses},
-            "approved_at": {"$gte": today_start},
+            "approved_at": {"$gte": today_start, "$lte": today_end},
             "void_amount": {"$gt": 0}
         }},
         {"$group": {"_id": None, "total": {"$sum": "$void_amount"}}}
@@ -175,28 +201,74 @@ async def get_dashboard(request: Request, authorization: str = Header(...)):
     voided_result = await db.orders.aggregate(voided_pipeline).to_list(1)
     voided_today = voided_result[0]["total"] if voided_result else 0
     
-    # Total profit calculation
+    # Total lifetime profit (for reference)
     all_deposits_pipeline = [
-        {"$match": {"order_type": {"$in": ["deposit", "wallet_load"]}, "status": {"$in": approved_statuses}}},
+        {"$match": {"order_type": {"$in": ["game_load", "deposit", "wallet_load"]}, "status": {"$in": approved_statuses}}},
         {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
     ]
     all_deposits_result = await db.orders.aggregate(all_deposits_pipeline).to_list(1)
     total_deposits = all_deposits_result[0]["total"] if all_deposits_result else 0
     
     all_withdrawals_pipeline = [
-        {"$match": {"order_type": {"$in": ["withdrawal", "wallet_redeem"]}, "status": {"$in": approved_statuses}}},
+        {"$match": {"order_type": {"$in": ["withdrawal_game", "withdrawal", "wallet_redeem"]}, "status": {"$in": approved_statuses}}},
         {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$payout_amount", "$amount"]}}}}
     ]
     all_withdrawals_result = await db.orders.aggregate(all_withdrawals_pipeline).to_list(1)
     total_withdrawals = all_withdrawals_result[0]["total"] if all_withdrawals_result else 0
     
-    net_profit = total_deposits - total_withdrawals
+    net_profit_lifetime = float(total_deposits or 0) - float(total_withdrawals or 0)
     
-    # Active clients
-    active_clients = await db.users.count_documents({"is_active": True, "role": "user"})
+    # ACTIVE CLIENTS (C) - Rolling 7 days with amount >= 10 and count >= 3
+    rolling_7d_start, rolling_7d_end = get_rolling_window(request, 7)
+    active_clients_pipeline = [
+        {"$match": {
+            "order_type": {"$in": ["game_load", "deposit"]},
+            "status": {"$in": approved_statuses},
+            "approved_at": {"$gte": rolling_7d_start, "$lte": rolling_7d_end},
+            "amount": {"$gte": 10}
+        }},
+        {"$group": {
+            "_id": "$user_id",
+            "load_count": {"$sum": 1}
+        }},
+        {"$match": {"load_count": {"$gte": 3}}},
+        {"$count": "active_clients"}
+    ]
+    active_clients_result = await db.orders.aggregate(active_clients_pipeline).to_list(1)
+    active_clients_7d = active_clients_result[0]["active_clients"] if active_clients_result else 0
     
-    # System status
+    # Total active clients (simple count)
+    active_clients_total = await db.users.count_documents({"is_active": True, "role": "user"})
+    
+    # CASH BALANCE (G) - SUM of all clients' withdrawable cash balance
+    cash_balance_pipeline = [
+        {"$match": {"role": "user", "is_active": True}},
+        {"$group": {
+            "_id": None,
+            "total": {"$sum": {
+                "$ifNull": [
+                    "$cash_balance",
+                    {"$ifNull": ["$wallet_balance", {"$ifNull": ["$real_balance", 0]}]}
+                ]
+            }}
+        }}
+    ]
+    cash_balance_result = await db.users.aggregate(cash_balance_pipeline).to_list(1)
+    cash_balance_total = cash_balance_result[0]["total"] if cash_balance_result else 0
+    
+    # System status check (F)
     system = await db.system_settings.find_one({"id": "global"})
+    
+    # Check Games API health (would need actual health check endpoint)
+    games_api_ok = True  # Placeholder - implement actual health check
+    telegram_api_ok = system.get('telegram_enabled', False) if system else False
+    
+    if not games_api_ok:
+        system_status = "down"
+    elif not telegram_api_ok:
+        system_status = "degraded"
+    else:
+        system_status = "operational"
     
     return {
         "pending_approvals": {
@@ -205,16 +277,23 @@ async def get_dashboard(request: Request, authorization: str = Header(...)):
             "withdrawals": pending_withdrawals
         },
         "today": {
-            "deposits_in": round(float(deposits_in or 0), 2),
-            "withdrawals_out": round(float(withdrawals_out or 0), 2),
-            "voided": round(float(voided_today or 0), 2)
+            "deposits_in": round(float(deposits_in_today or 0), 2),
+            "withdrawals_out": round(float(withdrawals_out_today or 0), 2),
+            "net_profit": round(net_profit_today, 2),
+            "voided": round(float(voided_today or 0), 2),
+            "referral_earnings_paid": round(float(referral_earnings_today or 0), 2)
         },
-        "net_profit": round(float(net_profit or 0), 2),
-        "active_clients": active_clients,
+        "net_profit": round(net_profit_lifetime, 2),
+        "active_clients": active_clients_total,
+        "active_clients_7d": active_clients_7d,
+        "cash_balance_total": round(float(cash_balance_total or 0), 2),
         "system_status": {
+            "status": system_status,
             "api_enabled": system.get('api_enabled', True) if system else True,
-            "telegram_enabled": system.get('telegram_enabled', False) if system else False,
-            "kill_switch": system.get('master_kill_switch', False) if system else False
+            "telegram_enabled": telegram_api_ok,
+            "kill_switch": system.get('master_kill_switch', False) if system else False,
+            "games_api": "ok" if games_api_ok else "error",
+            "telegram_api": "ok" if telegram_api_ok else "error"
         }
     }
 
