@@ -53,9 +53,18 @@ const Register = () => {
       );
       
       if (result.success) {
-        toast.success('Account created successfully! Welcome!');
-        navigate('/client/home');
+        // Check if this is a signup-only success (login failed after signup)
+        if (result.mode === 'signup_only') {
+          toast.success('Account created successfully. Please sign in.');
+          // Navigate to login with username prefilled via state
+          navigate('/login', { state: { prefillUsername: result.username || username } });
+        } else {
+          // Full success - signup + auto-login worked
+          toast.success('Account created successfully! Welcome!');
+          navigate('/client/home');
+        }
       } else {
+        // Signup failed - show the actual backend error message
         toast.error(result.message || 'Failed to create account');
       }
     } catch (error) {
