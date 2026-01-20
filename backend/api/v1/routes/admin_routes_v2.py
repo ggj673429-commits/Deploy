@@ -388,7 +388,7 @@ async def process_approval(
     }
 
 
-# ==================== 3. ORDERS ====================
+# ==================== 3. ORDERS (MongoDB) ====================
 
 @router.get("/orders", summary="List all orders with filters")
 async def list_orders(
@@ -400,35 +400,39 @@ async def list_orders(
     offset: int = 0,
     authorization: str = Header(...)
 ):
-    """List all orders with filters"""
+    """List all orders with filters using MongoDB"""
     auth = await require_admin_access(request, authorization)
     
-    query = "SELECT * FROM orders WHERE 1=1"
-    count_query = "SELECT COUNT(*) FROM orders WHERE 1=1"
-    params = []
+    db = await get_db()
+    
+    # Build query
+    query = {}
     
     if status_filter:
-        params.append(status_filter)
-        query += f" AND status = ${len(params)}"
-        count_query += f" AND status = ${len(params)}"
+        query["status"] = status_filter
+    
     if order_type:
-        params.append(order_type)
-        query += f" AND order_type = ${len(params)}"
-        count_query += f" AND order_type = ${len(params)}"
+        query["order_type"] = order_type
+    
+    # Get total count
+    total = await db.orders.count_documents(query)
+    
+    # Fetch orders with pagination
+    cursor = db.orders.find(query, {"_id": 0}).sort("created_at", -1).skip(offset).limit(limit)
+    orders = await cursor.to_list(length=limit)
+    
+    # If suspicious_only, filter by user flag
     if suspicious_only:
-        query += " AND (SELECT is_suspicious FROM users WHERE users.user_id = orders.user_id) = TRUE"
-        count_query += " AND (SELECT is_suspicious FROM users WHERE users.user_id = orders.user_id) = TRUE"
-    
-    total = await fetch_one(count_query, *params) if params else await fetch_one(count_query)
-    
-    params.extend([limit, offset])
-    query += f" ORDER BY created_at DESC LIMIT ${len(params)-1} OFFSET ${len(params)}"
-    
-    orders = await fetch_all(query, *params)
+        suspicious_user_ids = set()
+        user_cursor = db.users.find({"is_suspicious": True}, {"_id": 0, "user_id": 1})
+        async for user in user_cursor:
+            suspicious_user_ids.add(user.get('user_id'))
+        
+        orders = [o for o in orders if o.get('user_id') in suspicious_user_ids]
     
     return {
         "orders": [format_order_list(o) for o in orders],
-        "total": total['count'],
+        "total": total,
         "limit": limit,
         "offset": offset
     }
@@ -440,58 +444,70 @@ async def get_order_detail(
     order_id: str,
     authorization: str = Header(...)
 ):
-    """Get full order detail with balance flow"""
+    """Get full order detail with balance flow using MongoDB"""
     auth = await require_admin_access(request, authorization)
     
-    order = await fetch_one("SELECT * FROM orders WHERE order_id = $1", order_id)
+    db = await get_db()
+    
+    # Find order
+    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
     # Get user info
-    user = await fetch_one("SELECT username, real_balance, bonus_balance, play_credits FROM users WHERE user_id = $1", order['user_id'])
+    user = await db.users.find_one(
+        {"user_id": order.get('user_id')},
+        {"_id": 0, "username": 1, "real_balance": 1, "bonus_balance": 1, "play_credits": 1, "cash_balance": 1}
+    )
     
     # Parse metadata
-    metadata = json.loads(order['metadata']) if order.get('metadata') else {}
+    metadata = order.get('metadata', {})
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except:
+            metadata = {}
     
     return {
-        "order_id": order['order_id'],
+        "order_id": order.get('order_id'),
         "user": {
-            "user_id": order['user_id'],
-            "username": order['username'],
+            "user_id": order.get('user_id'),
+            "username": order.get('username'),
             "current_balance": {
-                "real": user['real_balance'] if user else 0,
-                "bonus": user['bonus_balance'] if user else 0,
-                "play_credits": user['play_credits'] if user else 0
+                "real": float(user.get('real_balance', 0) if user else 0),
+                "bonus": float(user.get('bonus_balance', 0) if user else 0),
+                "play_credits": float(user.get('play_credits', 0) if user else 0),
+                "cash": float(user.get('cash_balance', 0) if user else 0)
             }
         },
-        "order_type": order['order_type'],
+        "order_type": order.get('order_type'),
         "game": {
-            "name": order['game_name'],
-            "display_name": order['game_display_name']
+            "name": order.get('game_name'),
+            "display_name": order.get('game_display_name')
         },
         "amounts": {
-            "deposit_amount": order['amount'],
-            "play_credits_added": order.get('play_credits_added', 0),
-            "bonus_added": order['bonus_amount'],
-            "total_credited": order['total_amount']
+            "deposit_amount": float(order.get('amount', 0)),
+            "play_credits_added": float(order.get('play_credits_added', 0)),
+            "bonus_added": float(order.get('bonus_amount', 0)),
+            "total_credited": float(order.get('total_amount', 0))
         },
         "consumption": {
-            "cash_consumed": order.get('cash_consumed', 0),
-            "play_credits_consumed": order.get('play_credits_consumed', 0),
-            "bonus_consumed": order.get('bonus_consumed', 0)
+            "cash_consumed": float(order.get('cash_consumed', 0)),
+            "play_credits_consumed": float(order.get('play_credits_consumed', 0)),
+            "bonus_consumed": float(order.get('bonus_consumed', 0))
         },
         "cashout": {
-            "balance_at_cashout": metadata.get('balance_before', {}).get('total', 0) if order['order_type'] == 'withdrawal' else None,
+            "balance_at_cashout": metadata.get('balance_before', {}).get('total', 0) if order.get('order_type') in ['withdrawal', 'withdrawal_game'] else None,
             "min_cashout": metadata.get('min_cashout'),
             "max_cashout": metadata.get('max_cashout'),
-            "payout_amount": order.get('payout_amount', 0),
-            "void_amount": order.get('void_amount', 0),
+            "payout_amount": float(order.get('payout_amount', 0)),
+            "void_amount": float(order.get('void_amount', 0)),
             "void_reason": order.get('void_reason')
         },
         "profit": {
-            "net": order['amount'] - order.get('payout_amount', 0) if order['order_type'] == 'deposit' else -(order.get('payout_amount', 0))
+            "net": float(order.get('amount', 0)) - float(order.get('payout_amount', 0)) if order.get('order_type') in ['deposit', 'game_load'] else -float(order.get('payout_amount', 0))
         },
-        "status": order['status'],
+        "status": order.get('status'),
         "payment_proof_url": order.get('payment_proof_url'),
         "referral_code": order.get('referral_code'),
         "is_suspicious": order.get('is_suspicious', False),
