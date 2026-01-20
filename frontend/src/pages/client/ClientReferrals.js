@@ -347,13 +347,13 @@ const ClientReferrals = () => {
           <div className="grid grid-cols-2 gap-3">
             <StatCard 
               icon={Users} 
-              value={stats.total_referrals} 
+              value={toNumber(stats.total_referrals)} 
               label="Total Referrals" 
               color="violet"
             />
             <StatCard 
               icon={UserPlus} 
-              value={stats.active_referrals} 
+              value={toNumber(stats.active_referrals)} 
               label="Active Referrals" 
               color="blue"
             />
