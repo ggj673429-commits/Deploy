@@ -43,30 +43,44 @@ class OrderActionRequest(BaseModel):
 @router.get("/methods", summary="Get available payment methods")
 async def get_payment_methods(request: Request):
     """Get all active payment methods with QR codes"""
-    methods = await fetch_all("""
-        SELECT pm.method_id, pm.title, pm.tags, pm.instructions, pm.enabled, pm.priority
-        FROM payment_methods pm
-        WHERE pm.enabled = TRUE
-        ORDER BY pm.priority ASC
-    """)
+    db = await get_db()
+    
+    # Fetch enabled payment methods sorted by priority
+    cursor = db.payment_methods.find(
+        {"enabled": True}, 
+        {"_id": 0}
+    ).sort("priority", 1)
+    methods = await cursor.to_list(length=None)
     
     result = []
     for method in methods:
-        # Get QR codes for this method - join by title since that's how QR codes are linked
-        qr_codes = await fetch_all("""
-            SELECT qr_id, label, account_name, account_number, image_url, is_default
-            FROM payment_qr
-            WHERE payment_method = $1 AND is_active = TRUE
-            ORDER BY is_default DESC, label ASC
-        """, method['title'])
+        # Get the payment method identifier - could be title or method_id
+        method_title = method.get('title', '')
+        method_id = method.get('method_id', '')
+        
+        # Get QR codes for this method - match on both title and method_id for backward compatibility
+        qr_cursor = db.payment_qr.find(
+            {
+                "$and": [
+                    {"is_active": True},
+                    {"$or": [
+                        {"payment_method": method_title},
+                        {"payment_method": method_id}
+                    ]}
+                ]
+            },
+            {"_id": 0, "qr_id": 1, "label": 1, "account_name": 1, "account_number": 1, "image_url": 1, "is_default": 1}
+        ).sort([("is_default", -1), ("label", 1)])
+        
+        qr_codes = await qr_cursor.to_list(length=None)
         
         result.append({
-            "method_id": method['method_id'],
-            "title": method['title'],
-            "tags": method['tags'],
-            "instructions": method['instructions'],
-            "enabled": method['enabled'],
-            "qr_codes": [dict(qr) for qr in qr_codes]
+            "method_id": method_id,
+            "title": method_title,
+            "tags": method.get('tags', []),
+            "instructions": method.get('instructions', ''),
+            "enabled": method.get('enabled', True),
+            "qr_codes": serialize_docs(qr_codes)
         })
     
     return {"success": True, "methods": result}
