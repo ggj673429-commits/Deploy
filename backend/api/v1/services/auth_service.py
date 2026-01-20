@@ -291,19 +291,20 @@ async def validate_token(token: str) -> Tuple[bool, Dict[str, Any]]:
     if not user_id:
         return False, {"message": "Invalid token", "error_code": ErrorCodes.INVALID_TOKEN}
     
-    # Verify user exists and is active
-    user = await fetch_one(
-        "SELECT user_id, username, display_name, referral_code, role, is_active FROM users WHERE user_id = $1",
-        user_id
+    # Verify user exists and is active from MongoDB
+    from ..core.database import get_db, serialize_doc
+    db = await get_db()
+    user = await db.users.find_one(
+        {"user_id": user_id},
+        {"user_id": 1, "username": 1, "display_name": 1, "referral_code": 1, "role": 1, "is_active": 1}
     )
+    user = serialize_doc(user)
     
     if not user or not user.get('is_active', True):
         return False, {"message": "User not found or disabled", "error_code": ErrorCodes.USER_NOT_FOUND}
     
-    # Update session last used
-    await execute('''
-        UPDATE sessions SET last_used_at = $1 WHERE access_token = $2 AND is_active = TRUE
-    ''', datetime.now(timezone.utc), token)
+    # Note: Session tracking removed for MongoDB compatibility
+    # JWT expiration is still validated
     
     return True, {
         "user_id": user['user_id'],
