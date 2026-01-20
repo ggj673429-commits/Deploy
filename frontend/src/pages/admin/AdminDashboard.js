@@ -16,13 +16,21 @@ import {
   AlertCircle,
   Activity,
   User,
-  Clock
+  Clock,
+  Wallet,
+  DollarSign
 } from 'lucide-react';
 import RiskSnapshotCards from '../../components/analytics/RiskSnapshotCards';
 import PlatformTrendChart from '../../components/analytics/PlatformTrendChart';
 
 // Centralized Admin API
 import { dashboardApi, referralsApi, auditApi, getErrorMessage } from '../../api/admin';
+
+// Helper: Safe money formatting - NEVER call toFixed on non-number
+const toMoney = (value) => {
+  const num = Number(value || 0);
+  return isNaN(num) ? '0.00' : num.toFixed(2);
+};
 
 // Helper functions for Admin Activity Widget
 const formatAction = (action) => {
