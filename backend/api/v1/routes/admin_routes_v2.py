@@ -298,7 +298,7 @@ async def get_dashboard(request: Request, authorization: str = Header(...)):
     }
 
 
-# ==================== 2. APPROVALS ====================
+# ==================== 2. APPROVALS (MongoDB) ====================
 
 @router.get("/approvals/pending", summary="Get pending approvals")
 async def get_pending_approvals(
@@ -306,44 +306,46 @@ async def get_pending_approvals(
     order_type: Optional[str] = None,
     authorization: str = Header(...)
 ):
-    """Get all pending approvals"""
+    """Get all pending approvals using MongoDB"""
     auth = await require_admin_access(request, authorization)
     
-    query = """
-        SELECT o.*, 
-               COALESCE(u.is_suspicious, FALSE) as is_suspicious, 
-               COALESCE(co.manual_approval_required, FALSE) as manual_approval_only
-        FROM orders o
-        LEFT JOIN users u ON o.user_id = u.user_id
-        LEFT JOIN client_overrides co ON o.user_id = co.user_id
-        WHERE o.status IN ('pending_review', 'awaiting_payment_proof')
-    """
-    params = []
+    db = await get_db()
+    
+    # Build query
+    pending_statuses = ['pending_review', 'awaiting_payment_proof', 'pending', 'initiated', 'PENDING_REVIEW']
+    query = {"status": {"$in": pending_statuses}}
     
     if order_type:
-        params.append(order_type)
-        query += f" AND o.order_type = ${len(params)}"
+        query["order_type"] = order_type
     
-    query += " ORDER BY o.created_at ASC"
+    # Fetch orders
+    cursor = db.orders.find(query, {"_id": 0}).sort("created_at", 1)
+    orders = await cursor.to_list(length=100)
     
-    orders = await fetch_all(query, *params) if params else await fetch_all(query)
-    
-    return {
-        "pending": [{
-            "order_id": o['order_id'],
-            "username": o['username'],
-            "order_type": o['order_type'],
-            "game_name": o['game_name'],
-            "amount": o['amount'],
-            "bonus_amount": o['bonus_amount'],
-            "total_amount": o['total_amount'],
-            "status": o['status'],
+    # Enrich with user data
+    result = []
+    for o in orders:
+        # Get user flags
+        user = await db.users.find_one({"user_id": o.get('user_id')}, {"_id": 0, "is_suspicious": 1})
+        
+        result.append({
+            "order_id": o.get('order_id'),
+            "username": o.get('username'),
+            "order_type": o.get('order_type'),
+            "game_name": o.get('game_name'),
+            "amount": float(o.get('amount', 0)),
+            "bonus_amount": float(o.get('bonus_amount', 0)),
+            "total_amount": float(o.get('total_amount', 0)),
+            "status": o.get('status'),
             "payment_proof_url": o.get('payment_proof_url'),
-            "is_suspicious": o.get('is_suspicious', False),
+            "is_suspicious": user.get('is_suspicious', False) if user else False,
             "manual_approval_only": o.get('manual_approval_only', False),
             "created_at": o['created_at'].isoformat() if o.get('created_at') else None
-        } for o in orders],
-        "total": len(orders)
+        })
+    
+    return {
+        "pending": result,
+        "total": len(result)
     }
 
 
