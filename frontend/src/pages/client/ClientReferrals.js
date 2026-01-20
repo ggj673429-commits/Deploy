@@ -450,8 +450,11 @@ const ClientReferrals = () => {
 
           {referrals.length > 0 ? (
             <div className="space-y-3">
-              {referrals.map((referral, idx) => (
-                <ReferralProgress key={idx} referral={referral} />
+              {referrals.map((referral) => (
+                <ReferralProgress 
+                  key={referral.referee_id || referral.user_id || referral.referral_code || referral.masked_username} 
+                  referral={referral} 
+                />
               ))}
             </div>
           ) : (
