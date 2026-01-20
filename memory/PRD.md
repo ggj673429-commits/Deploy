@@ -1,12 +1,12 @@
 # Financial Gaming Platform - PRD
 
 ## Project Overview
-Full-stack financial gaming platform with React frontend, FastAPI backend, and PostgreSQL database.
+Full-stack financial gaming platform with React frontend, FastAPI backend, and MongoDB database.
 
 ## Tech Stack
 - **Frontend**: React.js with Tailwind CSS
 - **Backend**: FastAPI (Python)
-- **Database**: PostgreSQL
+- **Database**: MongoDB (migrated from PostgreSQL)
 - **Auth**: JWT-based authentication
 
 ## User Personas
