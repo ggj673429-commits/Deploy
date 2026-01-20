@@ -466,22 +466,24 @@ const ClientWallet = () => {
               />
             ) : (
               <div className="space-y-2">
-                {filteredTransactions.map(tx => (
+                {filteredTransactions.map(tx => {
+                  const txId = getEntityId(tx);
+                  const txIsIncoming = isIncoming(tx);
+                  const gameName = getGameName(tx);
+                  return (
                   <div 
-                    key={tx.order_id || tx.id}
+                    key={txId}
                     className="bg-white/[0.02] border border-white/5 rounded-xl overflow-hidden"
                   >
                     <button
-                      onClick={() => toggleExpand(tx.order_id || tx.id)}
+                      onClick={() => toggleExpand(txId)}
                       className="w-full p-4 flex items-center justify-between text-left"
                     >
                       <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                          tx.type === 'IN' || tx.order_type?.includes('load') || tx.order_type?.includes('deposit')
-                            ? 'bg-emerald-500/10'
-                            : 'bg-red-500/10'
+                          txIsIncoming ? 'bg-emerald-500/10' : 'bg-red-500/10'
                         }`}>
-                          {tx.type === 'IN' || tx.order_type?.includes('load') || tx.order_type?.includes('deposit') ? (
+                          {txIsIncoming ? (
                             <ArrowDownLeft className="w-5 h-5 text-emerald-400" />
                           ) : (
                             <ArrowUpRight className="w-5 h-5 text-red-400" />
@@ -496,23 +498,18 @@ const ClientWallet = () => {
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right">
-                          <p className={`font-semibold ${
-                            tx.type === 'IN' || tx.order_type?.includes('load') || tx.order_type?.includes('deposit')
-                              ? 'text-emerald-400'
-                              : 'text-red-400'
-                          }`}>
-                            {tx.type === 'IN' || tx.order_type?.includes('load') || tx.order_type?.includes('deposit') ? '+' : '-'}
-                            ${(tx.amount || 0).toFixed(2)}
+                          <p className={`font-semibold ${txIsIncoming ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {txIsIncoming ? '+' : '-'}${toMoney(tx.amount)}
                           </p>
                           <span className={`text-xs px-2 py-0.5 rounded-lg ${getStatusColor(tx.status)}`}>
-                            {tx.status?.replace(/_/g, ' ')}
+                            {normStatus(tx.status).replace(/_/g, ' ')}
                           </span>
                         </div>
-                        <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${expandedTx === (tx.order_id || tx.id) ? 'rotate-180' : ''}`} />
+                        <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${expandedTx === txId ? 'rotate-180' : ''}`} />
                       </div>
                     </button>
                     
-                    {expandedTx === (tx.order_id || tx.id) && (
+                    {expandedTx === txId && (
                       <div className="px-4 pb-4 pt-2 border-t border-white/5 space-y-2 text-sm">
                         {tx.order_id && (
                           <div className="flex justify-between">
@@ -520,10 +517,10 @@ const ClientWallet = () => {
                             <span className="text-gray-300 font-mono text-xs">{tx.order_id.slice(0, 8)}...</span>
                           </div>
                         )}
-                        {tx.game_name && (
+                        {gameName && (
                           <div className="flex justify-between">
                             <span className="text-gray-500">Game</span>
-                            <span className="text-gray-300">{tx.game_name}</span>
+                            <span className="text-gray-300">{gameName}</span>
                           </div>
                         )}
                         {tx.payment_method && (
@@ -539,8 +536,9 @@ const ClientWallet = () => {
                           </div>
                         )}
                         <button
-                          onClick={() => navigate(`/client/wallet/transaction/${tx.order_id}`)}
+                          onClick={() => txId && navigate(`/client/wallet/transaction/${tx.order_id || txId}`)}
                           className="w-full mt-2 py-2 text-violet-400 hover:text-violet-300 text-sm flex items-center justify-center gap-1"
+                          disabled={!txId}
                         >
                           View Full Details
                           <ChevronRight className="w-4 h-4" />
@@ -548,7 +546,8 @@ const ClientWallet = () => {
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
