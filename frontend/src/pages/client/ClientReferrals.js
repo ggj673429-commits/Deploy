@@ -401,6 +401,7 @@ const ClientReferrals = () => {
                 onClick={handleShareTelegram}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-[#229ED9]/20 text-[#229ED9] rounded-xl hover:bg-[#229ED9]/30 transition-colors text-sm font-medium"
                 data-testid="share-telegram-btn"
+                aria-label="Share referral link on Telegram"
               >
                 <Send className="w-4 h-4" />
                 Telegram
@@ -409,6 +410,7 @@ const ClientReferrals = () => {
                 onClick={handleShareWhatsApp}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-[#25D366]/20 text-[#25D366] rounded-xl hover:bg-[#25D366]/30 transition-colors text-sm font-medium"
                 data-testid="share-whatsapp-btn"
+                aria-label="Share referral link on WhatsApp"
               >
                 <MessageCircle className="w-4 h-4" />
                 WhatsApp
