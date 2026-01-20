@@ -2,10 +2,10 @@
  * ClientHome - Client Dashboard
  * Route: /client/home
  * 
- * Phase 7: Updated with unified design system
- * - Referral banner prominently placed below wallet card
- * - Consistent card styling
- * - Unified button components
+ * Features:
+ * - Uses /portal/transactions/enhanced for recent activity (same as Wallet)
+ * - Falls back to /orders if enhanced fails
+ * - Normalized data with utils
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 
 // Centralized API
+import http from '../../api/http';
 import { walletApi, transactionsApi, rewardsApi, getErrorMessage } from '../../api';
 import { ClientBottomNav } from '../../features/shared/ClientBottomNav';
 import { PageLoader } from '../../features/shared/LoadingStates';
@@ -34,17 +35,42 @@ const ClientHome = () => {
   const [hasWelcomeCredit, setHasWelcomeCredit] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // Fetch recent activity - prefer enhanced endpoint, fallback to orders
+  const fetchRecentActivity = useCallback(async () => {
+    // Try enhanced endpoint first (same as Wallet page uses)
+    try {
+      const enhancedRes = await http.get('/portal/transactions/enhanced', {
+        params: { limit: 5 }
+      });
+      const transactions = enhancedRes.data?.transactions || enhancedRes.data || [];
+      if (Array.isArray(transactions)) {
+        return transactions;
+      }
+    } catch (err) {
+      console.warn('Enhanced transactions failed, falling back to orders:', err);
+    }
+    
+    // Fallback to orders endpoint
+    try {
+      const ordersRes = await transactionsApi.getOrderHistory(5);
+      return ordersRes.data?.orders || [];
+    } catch (err) {
+      console.warn('Orders fallback also failed:', err);
+      return [];
+    }
+  }, []);
+
   const fetchData = useCallback(async () => {
     try {
-      const [walletRes, ordersRes, creditRes] = await Promise.all([
+      const [walletRes, recentActivity, creditRes] = await Promise.all([
         walletApi.getBalance(),
-        transactionsApi.getOrderHistory(5).catch(() => ({ data: { orders: [] } })),
+        fetchRecentActivity(),
         rewardsApi.getWelcomeCredit().catch(() => ({ data: { has_credit: false } }))
       ]);
       
       setWalletData(walletRes.data);
-      setRecentOrders(ordersRes.data.orders || []);
-      setHasWelcomeCredit(creditRes.data.has_credit || false);
+      setRecentOrders(recentActivity);
+      setHasWelcomeCredit(creditRes.data?.has_credit || false);
     } catch (error) {
       console.error('Failed to fetch data:', error);
       setWalletData({
@@ -56,7 +82,7 @@ const ClientHome = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchRecentActivity]);
 
   useEffect(() => {
     fetchData();
@@ -101,6 +127,7 @@ const ClientHome = () => {
             onClick={() => navigate('/client/profile')}
             className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white font-bold shadow-lg shadow-violet-500/20"
             data-testid="profile-btn"
+            aria-label="Go to profile"
           >
             {(user?.display_name || user?.username || 'P')[0].toUpperCase()}
           </button>
@@ -235,6 +262,7 @@ const ClientHome = () => {
               onClick={copyReferralCode}
               className="p-3 bg-violet-500/10 hover:bg-violet-500/20 rounded-xl transition-all"
               data-testid="copy-referral-btn"
+              aria-label="Copy referral code"
             >
               {copied ? (
                 <Check className="w-5 h-5 text-emerald-400" />
@@ -271,7 +299,7 @@ const ClientHome = () => {
                 const orderIsIncoming = isIncoming(order);
                 return (
                 <button
-                  key={orderId}
+                  key={orderId || `order-${order.created_at}`}
                   onClick={() => orderId && navigate(`/client/wallet/transaction/${order.order_id || orderId}`)}
                   className="w-full flex items-center justify-between p-4 bg-white/[0.02] border border-white/5 rounded-xl hover:bg-white/[0.04] transition-all text-left"
                   disabled={!orderId}
