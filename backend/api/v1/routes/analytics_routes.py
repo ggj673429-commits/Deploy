@@ -12,10 +12,18 @@ from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
 import json
+import logging
 
-from ..core.database import fetch_one, fetch_all, execute
+from ..core.database import get_db, serialize_doc, serialize_docs, get_timestamp
+from ..core.timezone_helper import (
+    get_client_today_range, 
+    get_last_n_days_ranges, 
+    get_rolling_window,
+    get_last_24h_range
+)
 from .dependencies import require_auth
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/analytics", tags=["Analytics"])
 
 
