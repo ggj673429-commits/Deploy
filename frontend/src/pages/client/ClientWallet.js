@@ -356,35 +356,35 @@ const ClientWallet = () => {
                       <div className="p-3 bg-white/5 rounded-xl">
                         <p className="text-xs text-gray-500">Locked Balance</p>
                         <p className="text-sm font-semibold text-amber-400">
-                          ${(breakdown.locked_balance || 0).toFixed(2)}
+                          ${toMoney(breakdown.locked_balance)}
                         </p>
                       </div>
                       <div className="p-3 bg-white/5 rounded-xl">
                         <p className="text-xs text-gray-500">Withdrawable Now</p>
                         <p className="text-sm font-semibold text-emerald-400">
-                          ${(breakdown.withdrawable || breakdown.available_to_withdraw || 0).toFixed(2)}
+                          ${toMoney(breakdown.withdrawable || breakdown.available_to_withdraw)}
                         </p>
                       </div>
                     </div>
                   )}
                   
                   {/* Bonus Progress */}
-                  {bonusProgress && bonusProgress.total_required > 0 && (
+                  {bonusProgress && toNumber(bonusProgress.total_required) > 0 && (
                     <div className="p-3 bg-white/5 rounded-xl">
                       <div className="flex items-center justify-between mb-2">
                         <p className="text-xs text-gray-500">Bonus Progress</p>
                         <p className="text-xs text-violet-400">
-                          {Math.round((bonusProgress.current_progress / bonusProgress.total_required) * 100)}%
+                          {Math.round((toNumber(bonusProgress.current_progress) / toNumber(bonusProgress.total_required)) * 100)}%
                         </p>
                       </div>
                       <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
                         <div 
                           className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full transition-all"
-                          style={{ width: `${Math.min(100, (bonusProgress.current_progress / bonusProgress.total_required) * 100)}%` }}
+                          style={{ width: `${Math.min(100, (toNumber(bonusProgress.current_progress) / toNumber(bonusProgress.total_required)) * 100)}%` }}
                         />
                       </div>
                       <p className="text-xs text-gray-500 mt-1">
-                        ${bonusProgress.current_progress?.toFixed(2)} / ${bonusProgress.total_required?.toFixed(2)} wagered
+                        ${toMoney(bonusProgress.current_progress)} / ${toMoney(bonusProgress.total_required)} wagered
                       </p>
                     </div>
                   )}
@@ -394,11 +394,11 @@ const ClientWallet = () => {
                     <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
                       <p className="text-xs text-gray-400 mb-1">If you withdraw now:</p>
                       <p className="text-lg font-bold text-emerald-400">
-                        You receive: ${(cashoutPreview.net_payout || cashoutPreview.receive_amount || 0).toFixed(2)}
+                        You receive: ${toMoney(cashoutPreview.net_payout || cashoutPreview.receive_amount)}
                       </p>
-                      {(cashoutPreview.forfeited_amount || cashoutPreview.bonus_forfeited) > 0 && (
+                      {toNumber(cashoutPreview.forfeited_amount || cashoutPreview.bonus_forfeited) > 0 && (
                         <p className="text-xs text-amber-400 mt-1">
-                          ⚠️ Locked/bonus forfeited: ${(cashoutPreview.forfeited_amount || cashoutPreview.bonus_forfeited || 0).toFixed(2)}
+                          ⚠️ Locked/bonus forfeited: ${toMoney(cashoutPreview.forfeited_amount || cashoutPreview.bonus_forfeited)}
                         </p>
                       )}
                     </div>
