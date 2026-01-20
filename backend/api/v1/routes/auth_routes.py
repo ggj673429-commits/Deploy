@@ -60,9 +60,20 @@ async def login(request: Request, login_data: LoginRequest):
     success, result = await authenticate_user(login_data.username, login_data.password)
     
     if not success:
+        # Check if it's a lockout error
+        status_code = status.HTTP_401_UNAUTHORIZED
+        if result.get('error_code') == ErrorCodes.ACCOUNT_LOCKED:
+            # Use 429 for rate limiting/lockout (or 401 with clear lockout fields)
+            status_code = status.HTTP_401_UNAUTHORIZED  # Keep 401 for consistency
+        
+        # Return error with all fields preserved
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=result
+            status_code=status_code,
+            detail={
+                "message": result.get('message', 'Authentication failed'),
+                "error_code": result.get('error_code', ErrorCodes.INVALID_CREDENTIALS),
+                "lockout_remaining_seconds": result.get('lockout_remaining'),
+            }
         )
     
     # Create JWT token - use 'sub' key for user_id as expected by validate_token
