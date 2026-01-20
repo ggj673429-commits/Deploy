@@ -143,14 +143,16 @@ const AdminLayout = () => {
                 <p className="text-xs text-gray-500">Administrator</p>
               </div>
             </div>
-            <button
-              onClick={handleLogout}
-              className="w-full flex items-center justify-center gap-2 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
-              data-testid="logout-btn"
-            >
-              <LogOut className="w-4 h-4" />
-              Logout
-            </button>
+            {isDashboard && (
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center justify-center gap-2 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
+                data-testid="logout-btn"
+              >
+                <LogOut className="w-4 h-4" />
+                Logout
+              </button>
+            )}
           </div>
         </div>
       </aside>
