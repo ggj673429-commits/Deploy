@@ -29,6 +29,23 @@ router = APIRouter(prefix="/admin/analytics", tags=["Analytics"])
 
 # ==================== AUTH HELPER ====================
 
+async def require_admin_access(request, authorization: str):
+    """Require admin role for access"""
+    from ..core.auth import get_current_user
+    
+    user = await get_current_user(request, authorization, None)
+    
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=403, 
+            detail={"message": "Admin access required", "error_code": "E1007"}
+        )
+    
+    return user
+
+
+# ==================== AUTH HELPER ====================
+
 async def require_admin_access(request: Request, authorization: str):
     """
     Require admin role for access.
