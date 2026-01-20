@@ -260,11 +260,11 @@ async def startup_event():
     await init_api_v1_db()
     
     # Initialize order lifecycle audit table
-    from api.v1.core.order_lifecycle import ensure_audit_table_exists
-    await ensure_audit_table_exists()
+    # TEMPORARILY DISABLED - needs MongoDB conversion
+    # from api.v1.core.order_lifecycle import ensure_audit_table_exists
+    # await ensure_audit_table_exists()
     
     # Log configuration summary
-    logger.info(f"Database pool: min={settings.db_pool_min}, max={settings.db_pool_max}")
     logger.info(f"API docs: {'enabled' if docs_enabled else 'disabled'}")
     logger.info(f"Bot routes: {'enabled' if settings.enable_bot_routes else 'disabled'}")
     logger.info(f"Admin routes: {'enabled' if settings.enable_admin_routes else 'disabled'}")
