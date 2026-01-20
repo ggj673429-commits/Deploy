@@ -291,8 +291,8 @@ const ClientReferrals = () => {
   }
 
   const stats = referralData?.stats || { total_referrals: 0, active_referrals: 0, total_earned: 0, pending_rewards: 0 };
-  const referralCode = referralData?.referral_code || user?.referral_code || 'N/A';
-  const referralLink = referralData?.referral_link || `${window.location.origin}/register?ref=${referralCode}`;
+  const referralCode = getReferralCode();
+  const referralLink = getReferralLink();
   const referrals = referralData?.referrals || [];
   const earnings = referralData?.earnings || [];
 
