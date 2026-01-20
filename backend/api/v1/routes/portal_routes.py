@@ -24,8 +24,10 @@ async def get_portal_user(request: Request, portal_token: Optional[str], client_
     Authenticate portal user from either token.
     
     SECURITY: No hardcoded users, full token validation.
+    Uses native MongoDB queries.
     """
     from ..core.auth import get_current_user, AuthenticatedUser
+    from ..core.database import get_db, serialize_doc
     
     # Build authorization header for canonical auth
     authorization = None
@@ -36,8 +38,11 @@ async def get_portal_user(request: Request, portal_token: Optional[str], client_
         # Use canonical auth
         auth_user = await get_current_user(request, authorization, portal_token)
         
-        # Get full user record
-        user = await fetch_one("SELECT * FROM users WHERE user_id = $1", auth_user.user_id)
+        # Get full user record from MongoDB
+        db = await get_db()
+        user = await db.users.find_one({"user_id": auth_user.user_id})
+        user = serialize_doc(user)
+        
         if not user:
             raise HTTPException(status_code=401, detail={"message": "User not found", "error_code": "E1004"})
         
