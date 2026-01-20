@@ -21,6 +21,74 @@ Full-stack financial gaming platform with React frontend, FastAPI backend, and M
 
 ---
 
+## What's Been Implemented (Jan 20, 2026 - Session 2)
+
+### P0: Admin Dashboard MongoDB Migration + Business Definitions ✅
+Complete rewrite of Admin Dashboard to use MongoDB with exact business definitions.
+
+**Backend Changes:**
+1. **Timezone Helper** (`/app/backend/api/v1/core/timezone_helper.py`):
+   - `get_client_today_range()` - Returns today's UTC boundaries based on client timezone
+   - `get_last_n_days_ranges()` - Returns N days of date ranges for trend charts
+   - `get_rolling_window()` - Returns rolling N-day window for active client calculations
+   - `get_last_24h_range()` - Returns last 24 hours for risk calculations
+
+2. **Dashboard Endpoint** (`GET /admin/dashboard`):
+   - Uses client timezone headers (X-Client-Timezone, X-Client-TZ-Offset)
+   - Returns exact business definitions:
+     - `deposits_in_today`: SUM of game_load.amount (approved_at in client's today)
+     - `withdrawals_out_today`: SUM of withdrawal_game.payout_amount
+     - `net_profit_today`: deposits - withdrawals - referral_earnings_paid
+     - `cash_balance_total`: SUM of all clients' withdrawable cash balance
+     - `active_clients_7d`: Distinct users with 3+ deposits ≥$10 in rolling 7 days
+
+3. **Analytics Endpoints** (MongoDB-native):
+   - `GET /admin/analytics/risk-snapshot`:
+     - `risk_max_24h`: MAX(deposit_amount * multiplier) from last 24h deposits
+     - `total_client_balance`: Combined cash/bonus/play_credits
+     - `cashout_pressure`: Pending withdrawal indicator
+   - `GET /admin/analytics/platform-trends`:
+     - 30 daily data points with deposits, withdrawals, bonus_issued, bonus_voided
+     - Includes `referral_earnings_paid` in totals
+     - Uses client timezone for day boundaries
+
+4. **Admin Routes Migration** (`admin_routes_v2.py`):
+   - `GET /admin/orders`: MongoDB pagination with order_type filter
+   - `GET /admin/orders/{id}`: Full order detail from MongoDB
+   - `GET /admin/approvals/pending`: Pending orders with user flags
+   - `GET /admin/referrals/dashboard`: Referral earnings totals (today, 7d, 30d)
+
+**Frontend Changes:**
+1. **http.js** - Sends timezone headers on every request:
+   - `X-Client-Timezone`: IANA timezone (e.g., "Asia/Manila")
+   - `X-Client-TZ-Offset`: Offset in minutes
+
+2. **AdminDashboard.js**:
+   - **New Cash Balance card** showing all clients' withdrawable balance
+   - Fixed drill-down links: Deposits → `/admin/orders?order_type=game_load`
+   - Fixed drill-down links: Withdrawals → `/admin/orders?order_type=withdrawal_game`
+   - Safe formatting with `toMoney()` helper (no more toFixed on non-numbers)
+   - Added active_clients_7d display
+   - Added Referral Earnings Paid Today card
+
+3. **PlatformTrendChart.js**:
+   - Added Referral Earnings metric toggle
+   - Uses `data.data` from backend response
+   - Safe value formatting with `toMoney()` helper
+   - Shows 6 totals including referral_earnings_paid
+
+4. **RiskSnapshotCards.js**:
+   - **Risk Max 24h card** (replaces "Max Cashout Exposure")
+   - Shows MAX(deposit * multiplier) from last 24h deposits
+   - Safe value formatting
+
+### P0: Payment QR System Migration ✅
+- Admin Payment QR CRUD endpoints migrated to MongoDB
+- Admin Payment Methods CRUD endpoints migrated to MongoDB
+- Client `/payments/methods` endpoint fetches from MongoDB
+
+---
+
 ## What's Been Implemented (Jan 18, 2026)
 
 ### P0-1: Payment Methods + QR Code Wiring ✅
@@ -44,9 +112,18 @@ Full-stack financial gaming platform with React frontend, FastAPI backend, and M
 ---
 
 ## Files Modified
-- `/app/frontend/src/pages/client/AddFunds.js` - P0-1 fixes
-- `/app/frontend/src/pages/admin/AdminBalanceControl.js` - P0-2 fixes
-- `/app/frontend/src/pages/client/ClientRewards.js` - P1 verified (already implemented)
+**Backend (MongoDB Migration):**
+- `/app/backend/api/v1/core/timezone_helper.py` - NEW: Timezone utilities
+- `/app/backend/api/v1/routes/admin_routes_v2.py` - Dashboard, Orders, Approvals, Referrals
+- `/app/backend/api/v1/routes/analytics_routes.py` - Risk snapshot, Platform trends
+- `/app/backend/api/v1/routes/admin_system_routes.py` - Payment Methods/QR CRUD
+- `/app/backend/api/v1/routes/payment_routes.py` - Client payment methods
+
+**Frontend:**
+- `/app/frontend/src/api/http.js` - Timezone headers
+- `/app/frontend/src/pages/admin/AdminDashboard.js` - Cash Balance card, fixed links
+- `/app/frontend/src/components/analytics/PlatformTrendChart.js` - Referral earnings
+- `/app/frontend/src/components/analytics/RiskSnapshotCards.js` - Risk Max 24h
 
 ## Test Data Created
 - User: `testuser` / `Test123456` (client)
