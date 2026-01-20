@@ -127,7 +127,10 @@ async def resolve_user_from_jwt(token: str) -> Optional[AuthenticatedUser]:
     """
     Resolve user from JWT token.
     Validates signature, expiration, and user existence.
+    Uses native MongoDB queries.
     """
+    from ..core.database import get_db, serialize_doc
+    
     # Decode and validate JWT
     payload = decode_jwt_token(token)
     
@@ -139,12 +142,13 @@ async def resolve_user_from_jwt(token: str) -> Optional[AuthenticatedUser]:
     if not user_id:
         return None
     
-    # Verify user exists and is active
-    user = await fetch_one(
-        """SELECT user_id, username, display_name, referral_code, role, is_active 
-           FROM users WHERE user_id = $1""",
-        user_id
+    # Verify user exists and is active using MongoDB
+    db = await get_db()
+    user = await db.users.find_one(
+        {"user_id": user_id},
+        {"user_id": 1, "username": 1, "display_name": 1, "referral_code": 1, "role": 1, "is_active": 1}
     )
+    user = serialize_doc(user)
     
     if not user:
         return None
