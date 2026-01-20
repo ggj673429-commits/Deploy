@@ -63,6 +63,9 @@ const AdminLayout = () => {
     navigate('/login');
   };
 
+  // Only show logout on dashboard page
+  const isDashboard = location.pathname === '/admin';
+
   const isActive = (item) => {
     if (item.exact) {
       return location.pathname === item.path;
