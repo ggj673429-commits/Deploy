@@ -7,14 +7,15 @@
  * - GuestGuard handles redirect if already authenticated
  */
 
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getErrorMessage } from '../api/http';
 import { LogIn, Eye, EyeOff, AlertCircle, User, UserPlus, RefreshCw, WifiOff } from 'lucide-react';
 
 const Login = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login, serverUnavailable, clearServerError } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -22,6 +23,13 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [isNetworkError, setIsNetworkError] = useState(false);
+
+  // Prefill username from navigation state (e.g., after signup-only success)
+  useEffect(() => {
+    if (location.state?.prefillUsername) {
+      setUsername(location.state.prefillUsername);
+    }
+  }, [location.state]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
