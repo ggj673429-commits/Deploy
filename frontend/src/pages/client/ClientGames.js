@@ -1,13 +1,13 @@
 /**
- * ClientGames - Migrated to new API layer
+ * ClientGames - Production-grade games page
  * Route: /client/games
  * 
  * Features:
  * - List games with accounts
- * - Create account
- * - Load from wallet
- * - Redeem to wallet
- * - Safe error handling
+ * - Independent data fetching (partial failure resilient)
+ * - Create account with immediate credentials display
+ * - Load from wallet / Redeem to wallet
+ * - Safe error handling with retry
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
@@ -16,7 +16,7 @@ import { useAuth } from '../../context/AuthContext';
 import { toast } from 'sonner';
 import { 
   Gamepad2, Plus, ArrowUpRight, ArrowDownLeft, RefreshCw,
-  Eye, EyeOff, Copy, Check, AlertCircle, Loader2
+  Eye, EyeOff, Copy, Check, AlertCircle, Loader2, X, AlertTriangle
 } from 'lucide-react';
 
 // Centralized API - using wrappers
@@ -24,60 +24,117 @@ import { gamesApi, walletApi, getErrorMessage, isServerUnavailable } from '../..
 import { ClientBottomNav } from '../../features/shared/ClientBottomNav';
 import { PageLoader } from '../../features/shared/LoadingStates';
 import { EmptyState, ErrorState } from '../../features/shared/EmptyStates';
+import { toNumber, toMoney } from '../../utils/normalize';
 
 const ClientGames = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  
+  // Data states - separate for partial failure handling
+  const [gamesLoading, setGamesLoading] = useState(true);
+  const [gamesError, setGamesError] = useState(null);
   const [games, setGames] = useState([]);
+  
+  const [accountsLoading, setAccountsLoading] = useState(true);
+  const [accountsError, setAccountsError] = useState(null);
   const [myAccounts, setMyAccounts] = useState([]);
+  
+  const [walletLoading, setWalletLoading] = useState(true);
+  const [walletError, setWalletError] = useState(null);
   const [walletBalance, setWalletBalance] = useState(0);
+  
   const [activeGame, setActiveGame] = useState(null);
   const [showLoadModal, setShowLoadModal] = useState(false);
   const [showRedeemModal, setShowRedeemModal] = useState(false);
   const [loadAmount, setLoadAmount] = useState('');
   const [redeemAmount, setRedeemAmount] = useState('');
   const [processing, setProcessing] = useState(false);
+  
+  // Credentials modal for newly created accounts
+  const [showCredentialsModal, setShowCredentialsModal] = useState(false);
+  const [newCredentials, setNewCredentials] = useState(null);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    
+  // Independent fetch functions for partial failure resilience
+  const fetchGames = useCallback(async () => {
+    setGamesLoading(true);
+    setGamesError(null);
     try {
-      const [gamesRes, accountsRes, walletRes] = await Promise.all([
-        gamesApi.getGames(),
-        gamesApi.getMyAccounts().catch(() => ({ data: { accounts: [] } })),
-        walletApi.getBalance()
-      ]);
-      
-      setGames(gamesRes.data.games || gamesRes.data || []);
-      setMyAccounts(accountsRes.data.accounts || accountsRes.data || []);
-      setWalletBalance(walletRes.data.wallet_balance || walletRes.data.real_balance || 0);
+      const res = await gamesApi.getGames();
+      setGames(res.data.games || res.data || []);
     } catch (err) {
       const message = getErrorMessage(err, 'Failed to load games');
-      setError(message);
-      
+      setGamesError(message);
       if (!isServerUnavailable(err)) {
         setGames([]);
       }
     } finally {
-      setLoading(false);
+      setGamesLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const fetchAccounts = useCallback(async () => {
+    setAccountsLoading(true);
+    setAccountsError(null);
+    try {
+      const res = await gamesApi.getMyAccounts();
+      setMyAccounts(res.data.accounts || res.data || []);
+    } catch (err) {
+      // Accounts are best-effort - don't block page
+      setAccountsError('Could not load accounts');
+      setMyAccounts([]);
+    } finally {
+      setAccountsLoading(false);
+    }
+  }, []);
 
-  const createAccount = async (gameId) => {
+  const fetchWallet = useCallback(async () => {
+    setWalletLoading(true);
+    setWalletError(null);
+    try {
+      const res = await walletApi.getBalance();
+      setWalletBalance(toNumber(res.data.wallet_balance ?? res.data.real_balance ?? res.data.cash_balance));
+    } catch (err) {
+      // Wallet is best-effort - don't block page
+      setWalletError('Could not load balance');
+      setWalletBalance(0);
+    } finally {
+      setWalletLoading(false);
+    }
+  }, []);
+
+  // Fetch all data independently
+  const fetchAllData = useCallback(() => {
+    fetchGames();
+    fetchAccounts();
+    fetchWallet();
+  }, [fetchGames, fetchAccounts, fetchWallet]);
+
+  useEffect(() => {
+    fetchAllData();
+  }, [fetchAllData]);
+
+  const createAccount = async (gameId, gameName) => {
     setProcessing(true);
     try {
       const response = await gamesApi.createAccount(gameId, user?.username);
       
       if (response.data.success) {
+        // Extract credentials from response
+        const credentials = {
+          game_name: gameName,
+          game_username: response.data.game_username || response.data.username,
+          game_password: response.data.game_password || response.data.password,
+        };
+        
+        // Show credentials immediately in modal
+        if (credentials.game_username && credentials.game_password) {
+          setNewCredentials(credentials);
+          setShowCredentialsModal(true);
+        }
+        
         toast.success('Account created!');
-        fetchData();
+        // Refresh accounts list
+        fetchAccounts();
       } else {
         throw new Error(response.data.message || 'Failed to create account');
       }
@@ -90,24 +147,26 @@ const ClientGames = () => {
   };
 
   const loadGame = async () => {
-    if (!loadAmount || parseFloat(loadAmount) <= 0) {
+    const parsedAmount = parseFloat(loadAmount);
+    if (!loadAmount || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       toast.error('Please enter a valid amount');
       return;
     }
-    if (parseFloat(loadAmount) > walletBalance) {
+    if (parsedAmount > walletBalance) {
       toast.error('Insufficient wallet balance');
       return;
     }
 
     setProcessing(true);
     try {
-      const response = await gamesApi.loadGame(activeGame.game_id, parseFloat(loadAmount));
+      const response = await gamesApi.loadGame(activeGame.game_id, parsedAmount);
       
       if (response.data.success) {
-        toast.success(`Loaded $${loadAmount} to ${activeGame.display_name}!`);
+        toast.success(`Loaded $${toMoney(parsedAmount)} to ${activeGame.display_name}!`);
         setShowLoadModal(false);
         setLoadAmount('');
-        fetchData();
+        fetchWallet();
+        fetchAccounts();
       } else {
         throw new Error(response.data.message || 'Failed to load game');
       }
@@ -120,7 +179,8 @@ const ClientGames = () => {
   };
 
   const redeemGame = async () => {
-    if (!redeemAmount || parseFloat(redeemAmount) <= 0) {
+    const parsedAmount = parseFloat(redeemAmount);
+    if (!redeemAmount || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       toast.error('Please enter a valid amount');
       return;
     }
@@ -129,15 +189,16 @@ const ClientGames = () => {
     try {
       const response = await gamesApi.redeemGame(
         activeGame.game_id, 
-        parseFloat(redeemAmount),
+        parsedAmount,
         user?.username || 'User'
       );
       
       if (response.data.success) {
-        toast.success(`Redeemed $${redeemAmount} from ${activeGame.display_name}!`);
+        toast.success(`Redeemed $${toMoney(parsedAmount)} from ${activeGame.display_name}!`);
         setShowRedeemModal(false);
         setRedeemAmount('');
-        fetchData();
+        fetchWallet();
+        fetchAccounts();
       } else {
         throw new Error(response.data.message || 'Failed to redeem');
       }
@@ -153,11 +214,13 @@ const ClientGames = () => {
     return myAccounts.find(acc => acc.game_id === gameId);
   };
 
-  if (loading) {
+  // Show full page loader only if games are loading (primary content)
+  if (gamesLoading) {
     return <PageLoader message="Loading games..." />;
   }
 
-  if (error && games.length === 0) {
+  // Show error state only if games failed to load (primary content)
+  if (gamesError && games.length === 0) {
     return (
       <div className="min-h-screen bg-[#0a0a0f] pb-20" data-testid="client-games">
         <header className="sticky top-0 z-40 bg-[#0a0a0f]/90 backdrop-blur-xl border-b border-white/5">
@@ -168,8 +231,8 @@ const ClientGames = () => {
         <main className="px-4 py-6">
           <ErrorState 
             title="Could not load games" 
-            description={error}
-            onRetry={fetchData} 
+            description={gamesError}
+            onRetry={fetchGames} 
           />
         </main>
         <ClientBottomNav active="games" />
@@ -185,12 +248,42 @@ const ClientGames = () => {
           <h1 className="text-xl font-bold text-white">My Games</h1>
           <div className="text-right">
             <p className="text-xs text-gray-500">Wallet</p>
-            <p className="text-sm font-bold text-emerald-400">${walletBalance.toFixed(2)}</p>
+            {walletLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin text-gray-400 ml-auto" />
+            ) : walletError ? (
+              <button 
+                onClick={fetchWallet}
+                className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1"
+                aria-label="Retry loading wallet balance"
+              >
+                <AlertTriangle className="w-3 h-3" />
+                Retry
+              </button>
+            ) : (
+              <p className="text-sm font-bold text-emerald-400">${toMoney(walletBalance)}</p>
+            )}
           </div>
         </div>
       </header>
 
       <main className="px-4 py-6 space-y-4">
+        {/* Partial failure warnings */}
+        {accountsError && (
+          <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+              <span className="text-xs text-amber-400">{accountsError}</span>
+            </div>
+            <button 
+              onClick={fetchAccounts}
+              className="text-xs text-amber-400 hover:text-amber-300 px-2 py-1 bg-amber-500/10 rounded-lg"
+              aria-label="Retry loading accounts"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {games.length === 0 ? (
           <EmptyState
             icon="games"
@@ -205,7 +298,8 @@ const ClientGames = () => {
                 key={game.game_id}
                 game={game}
                 account={account}
-                onCreateAccount={() => createAccount(game.game_id)}
+                accountsLoading={accountsLoading}
+                onCreateAccount={() => createAccount(game.game_id, game.display_name || game.game_name)}
                 onLoad={() => { setActiveGame(game); setShowLoadModal(true); }}
                 onRedeem={() => { setActiveGame(game); setShowRedeemModal(true); }}
                 processing={processing}
@@ -223,13 +317,14 @@ const ClientGames = () => {
             <p className="text-gray-400 text-sm mb-6">Transfer from wallet to game</p>
             
             <div className="mb-4">
-              <p className="text-xs text-gray-500 mb-2">Available: ${walletBalance.toFixed(2)}</p>
+              <p className="text-xs text-gray-500 mb-2">Available: ${toMoney(walletBalance)}</p>
               <input
                 type="number"
                 value={loadAmount}
                 onChange={(e) => setLoadAmount(e.target.value)}
                 placeholder="Enter amount"
-                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-violet-500/50"
+                disabled={processing}
+                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-violet-500/50 disabled:opacity-50"
                 data-testid="load-amount-input"
               />
               {loadAmount && parseFloat(loadAmount) > walletBalance && (
@@ -243,7 +338,8 @@ const ClientGames = () => {
             <div className="flex gap-3">
               <button
                 onClick={() => { setShowLoadModal(false); setLoadAmount(''); }}
-                className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white font-medium rounded-xl"
+                disabled={processing}
+                className="flex-1 py-3 bg-white/5 hover:bg-white/10 disabled:opacity-50 text-white font-medium rounded-xl"
               >
                 Cancel
               </button>
@@ -273,7 +369,8 @@ const ClientGames = () => {
                 value={redeemAmount}
                 onChange={(e) => setRedeemAmount(e.target.value)}
                 placeholder="Enter amount"
-                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-violet-500/50"
+                disabled={processing}
+                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-violet-500/50 disabled:opacity-50"
                 data-testid="redeem-amount-input"
               />
             </div>
@@ -281,7 +378,8 @@ const ClientGames = () => {
             <div className="flex gap-3">
               <button
                 onClick={() => { setShowRedeemModal(false); setRedeemAmount(''); }}
-                className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white font-medium rounded-xl"
+                disabled={processing}
+                className="flex-1 py-3 bg-white/5 hover:bg-white/10 disabled:opacity-50 text-white font-medium rounded-xl"
               >
                 Cancel
               </button>
@@ -298,13 +396,116 @@ const ClientGames = () => {
         </div>
       )}
 
+      {/* Credentials Modal - Show immediately after account creation */}
+      {showCredentialsModal && newCredentials && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+          <div className="w-full max-w-md bg-[#12121a] border border-emerald-500/30 rounded-2xl p-6 animate-fadeIn">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-10 h-10 bg-emerald-500/20 rounded-xl flex items-center justify-center">
+                  <Check className="w-5 h-5 text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Account Created!</h3>
+                  <p className="text-xs text-gray-400">{newCredentials.game_name}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setShowCredentialsModal(false); setNewCredentials(null); }}
+                className="p-2 hover:bg-white/10 rounded-lg"
+                aria-label="Close credentials modal"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+
+            <div className="p-4 bg-gradient-to-br from-emerald-900/20 to-violet-900/20 border border-emerald-500/20 rounded-xl mb-4">
+              <p className="text-xs text-amber-400 mb-3 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                Save these credentials - they won't be shown again!
+              </p>
+              
+              <CredentialField 
+                label="Username" 
+                value={newCredentials.game_username} 
+              />
+              <CredentialField 
+                label="Password" 
+                value={newCredentials.game_password}
+                isPassword 
+              />
+            </div>
+
+            <button
+              onClick={() => { setShowCredentialsModal(false); setNewCredentials(null); }}
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl"
+            >
+              I've Saved My Credentials
+            </button>
+          </div>
+        </div>
+      )}
+
       <ClientBottomNav active="games" />
     </div>
   );
 };
 
+// Credential Field Component for modals
+const CredentialField = ({ label, value, isPassword = false }) => {
+  const [showValue, setShowValue] = useState(!isPassword);
+  const [copied, setCopied] = useState(false);
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      toast.success(`${label} copied!`);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {
+      toast.error('Could not copy');
+    });
+  };
+
+  return (
+    <div className="flex items-center justify-between p-3 bg-black/30 rounded-lg mb-2 last:mb-0">
+      <div className="flex-1 min-w-0">
+        <span className="text-[10px] text-gray-500 uppercase tracking-wide block">{label}</span>
+        <p className="text-sm font-mono text-white truncate">
+          {isPassword && !showValue ? '••••••••' : value}
+        </p>
+      </div>
+      <div className="flex items-center gap-1 ml-2">
+        {isPassword && (
+          <button
+            onClick={() => setShowValue(!showValue)}
+            className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+            aria-label={showValue ? 'Hide password' : 'Show password'}
+          >
+            {showValue ? (
+              <EyeOff className="w-4 h-4 text-amber-400" />
+            ) : (
+              <Eye className="w-4 h-4 text-gray-400" />
+            )}
+          </button>
+        )}
+        <button
+          onClick={copyToClipboard}
+          className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+          aria-label={`Copy ${label.toLowerCase()}`}
+        >
+          {copied ? (
+            <Check className="w-4 h-4 text-emerald-400" />
+          ) : (
+            <Copy className="w-4 h-4 text-gray-400" />
+          )}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // Game Card Component with Credentials Vault
-const GameCard = ({ game, account, onCreateAccount, onLoad, onRedeem, processing }) => {
+const GameCard = ({ game, account, accountsLoading, onCreateAccount, onLoad, onRedeem, processing }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [copiedField, setCopiedField] = useState(null);
 
@@ -353,7 +554,11 @@ const GameCard = ({ game, account, onCreateAccount, onLoad, onRedeem, processing
 
       {/* Account Section */}
       <div className="p-4">
-        {account ? (
+        {accountsLoading ? (
+          <div className="flex items-center justify-center py-4">
+            <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+          </div>
+        ) : account ? (
           <>
             {/* Credentials Vault */}
             <div className="p-4 bg-gradient-to-br from-violet-900/20 to-fuchsia-900/20 border border-violet-500/20 rounded-xl mb-4" data-testid={`credentials-vault-${game.game_name}`}>
@@ -372,6 +577,7 @@ const GameCard = ({ game, account, onCreateAccount, onLoad, onRedeem, processing
                   onClick={() => copyToClipboard(account.game_username, 'Username')}
                   className="p-2 hover:bg-white/10 rounded-lg transition-colors"
                   data-testid={`copy-username-${game.game_name}`}
+                  aria-label="Copy username"
                 >
                   {copiedField === 'Username' ? (
                     <Check className="w-4 h-4 text-emerald-400" />
@@ -394,6 +600,7 @@ const GameCard = ({ game, account, onCreateAccount, onLoad, onRedeem, processing
                     onClick={() => setShowPassword(!showPassword)}
                     className="p-2 hover:bg-white/10 rounded-lg transition-colors"
                     data-testid={`toggle-password-${game.game_name}`}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
                     {showPassword ? (
                       <EyeOff className="w-4 h-4 text-amber-400" />
@@ -405,6 +612,7 @@ const GameCard = ({ game, account, onCreateAccount, onLoad, onRedeem, processing
                     onClick={() => copyToClipboard(account.game_password, 'Password')}
                     className="p-2 hover:bg-white/10 rounded-lg transition-colors"
                     data-testid={`copy-password-${game.game_name}`}
+                    aria-label="Copy password"
                   >
                     {copiedField === 'Password' ? (
                       <Check className="w-4 h-4 text-emerald-400" />
