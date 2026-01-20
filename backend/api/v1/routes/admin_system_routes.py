@@ -390,7 +390,7 @@ async def delete_payment_method(
     return {"message": "Payment method deleted successfully"}
 
 
-# ==================== PAYMENT QR MANAGEMENT ====================
+# ==================== PAYMENT QR MANAGEMENT (MongoDB Native) ====================
 
 class PaymentQRCreate(BaseModel):
     """Create payment QR"""
@@ -425,14 +425,15 @@ async def list_payment_qr(
     """
     await require_admin_access(request, authorization)
     
-    qr_codes = await fetch_all("""
-        SELECT qr_id, payment_method, label, account_name, account_number, 
-               image_url, is_active, is_default, created_at, updated_at
-        FROM payment_qr
-        ORDER BY payment_method, is_default DESC, created_at DESC
-    """)
+    db = await get_db()
+    cursor = db.payment_qr.find({}, {"_id": 0}).sort([
+        ("payment_method", 1), 
+        ("is_default", -1), 
+        ("created_at", -1)
+    ])
+    qr_codes = await cursor.to_list(length=None)
     
-    return {"qr_codes": [dict(qr) for qr in qr_codes]}
+    return {"qr_codes": serialize_docs(qr_codes)}
 
 
 @router.post("/payment-qr")
@@ -448,36 +449,39 @@ async def create_payment_qr(
     """
     auth = await require_admin_access(request, authorization)
     
+    db = await get_db()
     qr_id = str(uuid.uuid4())
+    now = get_timestamp()
     
     # If setting as default, unset other defaults for same payment method
     if data.is_default:
-        await execute("""
-            UPDATE payment_qr SET is_default = FALSE 
-            WHERE payment_method = $1
-        """, data.payment_method)
+        await db.payment_qr.update_many(
+            {"payment_method": data.payment_method},
+            {"$set": {"is_default": False, "updated_at": now}}
+        )
     
     # If this is active and we want only one active per method, deactivate others
     if data.is_active:
-        existing_active = await fetch_one("""
-            SELECT qr_id FROM payment_qr 
-            WHERE payment_method = $1 AND is_active = TRUE
-        """, data.payment_method)
-        
-        if existing_active:
-            # Deactivate the existing one
-            await execute("""
-                UPDATE payment_qr SET is_active = FALSE, updated_at = NOW()
-                WHERE qr_id = $1
-            """, existing_active['qr_id'])
+        await db.payment_qr.update_many(
+            {"payment_method": data.payment_method, "is_active": True},
+            {"$set": {"is_active": False, "updated_at": now}}
+        )
     
-    await execute("""
-        INSERT INTO payment_qr 
-        (qr_id, payment_method, label, account_name, account_number, image_url, 
-         is_active, is_default, created_by, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
-    """, qr_id, data.payment_method, data.label, data.account_name, 
-       data.account_number, data.image_url, data.is_active, data.is_default, auth.user_id)
+    qr_doc = {
+        "qr_id": qr_id,
+        "payment_method": data.payment_method,
+        "label": data.label,
+        "account_name": data.account_name,
+        "account_number": data.account_number,
+        "image_url": data.image_url,
+        "is_active": data.is_active,
+        "is_default": data.is_default,
+        "created_by": auth.user_id,
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    await db.payment_qr.insert_one(qr_doc)
     
     return {"qr_id": qr_id, "message": "Payment QR created successfully"}
 
@@ -495,48 +499,49 @@ async def update_payment_qr(
     """
     await require_admin_access(request, authorization)
     
+    db = await get_db()
+    now = get_timestamp()
+    
     # Check if QR exists
-    existing = await fetch_one("SELECT * FROM payment_qr WHERE qr_id = $1", qr_id)
+    existing = await db.payment_qr.find_one({"qr_id": qr_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Payment QR not found")
     
-    # If setting as default, unset other defaults
+    # Determine the payment method (new value or existing)
+    method = data.payment_method if data.payment_method else existing.get('payment_method')
+    
+    # If setting as default, unset other defaults for same method
     if data.is_default:
-        method = data.payment_method or existing['payment_method']
-        await execute("""
-            UPDATE payment_qr SET is_default = FALSE 
-            WHERE payment_method = $1 AND qr_id != $2
-        """, method, qr_id)
+        await db.payment_qr.update_many(
+            {"payment_method": method, "qr_id": {"$ne": qr_id}},
+            {"$set": {"is_default": False, "updated_at": now}}
+        )
     
     # If activating, deactivate others for same method (only ONE active per method)
     if data.is_active:
-        method = data.payment_method or existing['payment_method']
-        await execute("""
-            UPDATE payment_qr SET is_active = FALSE, updated_at = NOW()
-            WHERE payment_method = $1 AND qr_id != $2
-        """, method, qr_id)
+        await db.payment_qr.update_many(
+            {"payment_method": method, "qr_id": {"$ne": qr_id}},
+            {"$set": {"is_active": False, "updated_at": now}}
+        )
     
-    # Build update query dynamically
-    updates = []
-    params = []
-    param_idx = 1
+    # Build update dict dynamically
+    update_fields = {}
     
     for field in ['payment_method', 'label', 'account_name', 'account_number', 
                   'image_url', 'is_active', 'is_default']:
         value = getattr(data, field, None)
         if value is not None:
-            updates.append(f"{field} = ${param_idx}")
-            params.append(value)
-            param_idx += 1
+            update_fields[field] = value
     
-    if not updates:
+    if not update_fields:
         raise HTTPException(status_code=400, detail="No fields to update")
     
-    updates.append(f"updated_at = NOW()")
-    params.append(qr_id)
+    update_fields["updated_at"] = now
     
-    query = f"UPDATE payment_qr SET {', '.join(updates)} WHERE qr_id = ${param_idx}"
-    await execute(query, *params)
+    await db.payment_qr.update_one(
+        {"qr_id": qr_id},
+        {"$set": update_fields}
+    )
     
     return {"message": "Payment QR updated successfully"}
 
@@ -553,7 +558,11 @@ async def delete_payment_qr(
     """
     await require_admin_access(request, authorization)
     
-    await execute("DELETE FROM payment_qr WHERE qr_id = $1", qr_id)
+    db = await get_db()
+    result = await db.payment_qr.delete_one({"qr_id": qr_id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Payment QR not found")
     
     return {"message": "Payment QR deleted successfully"}
 
