@@ -816,15 +816,17 @@ async def get_referral_details(
 ):
     """
     Get referral program details including commission %, pending vs confirmed earnings, rules
+    Uses native MongoDB queries instead of SQL compatibility layer.
     """
+    from ..core.database import get_db, serialize_doc
+    
     client_token = authorization.replace("Bearer ", "") if authorization else None
     user = await get_portal_user(request, x_portal_token, client_token)
     
-    # Get referral settings from system
-    settings = await fetch_one("SELECT * FROM system_settings WHERE id = 'global'")
-    base_commission = float(settings.get('referral_commission_percent', 5) if settings else 5)
+    db = await get_db()
+    user_id = user['user_id']
     
-    # Tier system (can be stored in DB or hardcoded for now)
+    # Tier system (hardcoded for now)
     tiers = [
         {"tier": 0, "name": "Starter", "min_refs": 0, "commission": 5},
         {"tier": 1, "name": "Bronze", "min_refs": 10, "commission": 10},
@@ -834,53 +836,86 @@ async def get_referral_details(
         {"tier": 5, "name": "Diamond", "min_refs": 200, "commission": 30},
     ]
     
-    # Count active referrals (those who have deposited)
-    active_count = await fetch_one("""
-        SELECT COUNT(DISTINCT u.user_id) as count
-        FROM users u
-        JOIN orders o ON u.user_id = o.user_id
-        WHERE u.referred_by_user_id = $1 AND o.order_type = 'deposit' AND o.status = 'APPROVED_EXECUTED'
-    """, user['user_id'])
+    # Get total referrals count (users who signed up with this user's referral code)
+    total_referrals = await db.users.count_documents({"referred_by_user_id": user_id})
     
-    active_refs = active_count['count'] or 0
+    # Get all referred user IDs for aggregation
+    referred_users_cursor = db.users.find(
+        {"referred_by_user_id": user_id},
+        {"user_id": 1}
+    )
+    referred_user_ids = [doc["user_id"] async for doc in referred_users_cursor]
     
-    # Determine current tier
+    # Count active referrals (those who have at least one approved deposit)
+    active_refs = 0
+    pending_earnings_total = 0.0
+    confirmed_earnings_total = 0.0
+    
+    if referred_user_ids:
+        # Get approved deposits to count active referrals
+        active_pipeline = [
+            {"$match": {
+                "user_id": {"$in": referred_user_ids},
+                "order_type": "deposit",
+                "status": {"$in": ["APPROVED_EXECUTED", "approved", "completed"]}
+            }},
+            {"$group": {"_id": "$user_id"}},
+            {"$count": "active_count"}
+        ]
+        active_result = await db.orders.aggregate(active_pipeline).to_list(1)
+        active_refs = active_result[0]["active_count"] if active_result else 0
+    
+    # Determine current tier based on active referrals
     current_tier = tiers[0]
     for tier in tiers:
-        if active_refs >= tier['min_refs']:
+        if active_refs >= tier["min_refs"]:
             current_tier = tier
     
-    # Get pending earnings (from pending referral deposits)
-    pending_earnings = await fetch_one("""
-        SELECT COALESCE(SUM(o.amount * $2 / 100), 0) as pending
-        FROM users u
-        JOIN orders o ON u.user_id = o.user_id
-        WHERE u.referred_by_user_id = $1 
-        AND o.order_type = 'deposit' 
-        AND o.status IN ('pending_review', 'awaiting_payment_proof')
-    """, user['user_id'], current_tier['commission'])
+    commission_rate = current_tier["commission"]
     
-    # Get confirmed earnings (from approved referral deposits)
-    confirmed_earnings = await fetch_one("""
-        SELECT COALESCE(SUM(o.amount * $2 / 100), 0) as confirmed
-        FROM users u
-        JOIN orders o ON u.user_id = o.user_id
-        WHERE u.referred_by_user_id = $1 
-        AND o.order_type = 'deposit' 
-        AND o.status = 'APPROVED_EXECUTED'
-    """, user['user_id'], current_tier['commission'])
+    if referred_user_ids:
+        # Calculate pending earnings (from pending deposits of referred users)
+        pending_pipeline = [
+            {"$match": {
+                "user_id": {"$in": referred_user_ids},
+                "order_type": "deposit",
+                "status": {"$in": ["pending_review", "awaiting_payment_proof", "pending", "initiated"]}
+            }},
+            {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+        ]
+        pending_result = await db.orders.aggregate(pending_pipeline).to_list(1)
+        pending_deposit_total = pending_result[0]["total"] if pending_result else 0
+        pending_earnings_total = pending_deposit_total * commission_rate / 100
+        
+        # Calculate confirmed earnings (from approved deposits of referred users)
+        confirmed_pipeline = [
+            {"$match": {
+                "user_id": {"$in": referred_user_ids},
+                "order_type": "deposit",
+                "status": {"$in": ["APPROVED_EXECUTED", "approved", "completed"]}
+            }},
+            {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+        ]
+        confirmed_result = await db.orders.aggregate(confirmed_pipeline).to_list(1)
+        confirmed_deposit_total = confirmed_result[0]["total"] if confirmed_result else 0
+        confirmed_earnings_total = confirmed_deposit_total * commission_rate / 100
     
     # Find next tier
     next_tier = None
     for tier in tiers:
-        if tier['tier'] == current_tier['tier'] + 1:
+        if tier["tier"] == current_tier["tier"] + 1:
             next_tier = tier
             break
     
+    # Build referral link
+    base_url = request.base_url
+    referral_link = f"{base_url}register?ref={user['referral_code']}"
+    
     return {
         "referral_code": user['referral_code'],
+        "referral_link": referral_link,
         "commission": {
-            "current_percentage": current_tier['commission'],
+            "current_percentage": current_tier["commission"],
             "max_percentage": 30,
             "is_lifetime": True,
             "explanation": f"You earn {current_tier['commission']}% commission on ALL deposits made by your referrals - FOREVER!"
@@ -888,24 +923,20 @@ async def get_referral_details(
         "tier": {
             "current": current_tier,
             "next": next_tier,
-            "progress_to_next": active_refs - current_tier['min_refs'],
-            "refs_needed_for_next": next_tier['min_refs'] - active_refs if next_tier else 0,
+            "progress_to_next": active_refs - current_tier["min_refs"],
+            "refs_needed_for_next": next_tier["min_refs"] - active_refs if next_tier else 0,
             "all_tiers": tiers
         },
         "earnings": {
-            "pending": round(float(pending_earnings['pending'] or 0), 2),
-            "confirmed": round(float(confirmed_earnings['confirmed'] or 0), 2),
-            "total": round(float(pending_earnings['pending'] or 0) + float(confirmed_earnings['confirmed'] or 0), 2)
+            "pending": round(pending_earnings_total, 2),
+            "confirmed": round(confirmed_earnings_total, 2),
+            "total": round(pending_earnings_total + confirmed_earnings_total, 2)
         },
         "stats": {
             "active_referrals": active_refs,
-            "total_referrals": await fetch_one(
-                "SELECT COUNT(*) as count FROM users WHERE referred_by_user_id = $1",
-                user['user_id']
-            ).then(lambda r: r['count'] if r else 0) if False else (
-                await fetch_one("SELECT COUNT(*) as count FROM users WHERE referred_by_user_id = $1", user['user_id'])
-            )['count']
+            "total_referrals": total_referrals
         },
+        "referrals": [],  # Detailed referral list can be added later
         "rules": [
             "Share your referral code with friends",
             "They enter it when signing up via Messenger",
