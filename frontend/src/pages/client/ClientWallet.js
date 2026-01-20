@@ -570,18 +570,18 @@ const ClientWallet = () => {
               />
             ) : (
               deposits.map((dep, idx) => (
-                <div key={dep.request_id || idx} className="p-4 bg-white/[0.02] border border-white/5 rounded-xl">
+                <div key={getEntityId(dep) || idx} className="p-4 bg-white/[0.02] border border-white/5 rounded-xl">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       {getStatusIcon(dep.status)}
                       <div>
-                        <p className="font-medium text-white">${(dep.amount || 0).toFixed(2)}</p>
+                        <p className="font-medium text-white">${toMoney(dep.amount)}</p>
                         <p className="text-xs text-gray-500">{dep.payment_method || 'Deposit'}</p>
                       </div>
                     </div>
                     <div className="text-right">
                       <span className={`text-xs px-2 py-0.5 rounded-lg ${getStatusColor(dep.status)}`}>
-                        {dep.status?.replace(/_/g, ' ')}
+                        {normStatus(dep.status).replace(/_/g, ' ')}
                       </span>
                       <p className="text-xs text-gray-500 mt-1">{formatDate(dep.created_at)}</p>
                     </div>
@@ -621,28 +621,31 @@ const ClientWallet = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
-                    {ledger.map((entry, idx) => (
-                      <tr key={entry.ledger_id || idx} className="hover:bg-white/[0.02]">
+                    {ledger.map((entry, idx) => {
+                      const entryIsCredit = isIncoming(entry);
+                      return (
+                      <tr key={getEntityId(entry) || idx} className="hover:bg-white/[0.02]">
                         <td className="py-3 text-gray-400 text-xs">
                           {formatDate(entry.created_at)}
                         </td>
                         <td className="py-3">
                           <span className={`text-xs px-2 py-0.5 rounded ${
-                            entry.type === 'credit' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
+                            entryIsCredit ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
                           }`}>
-                            {entry.type || entry.transaction_type}
+                            {normStatus(entry.type || entry.transaction_type)}
                           </span>
                         </td>
                         <td className={`py-3 text-right font-medium ${
-                          entry.type === 'credit' ? 'text-emerald-400' : 'text-red-400'
+                          entryIsCredit ? 'text-emerald-400' : 'text-red-400'
                         }`}>
-                          {entry.type === 'credit' ? '+' : '-'}${Math.abs(entry.amount || 0).toFixed(2)}
+                          {entryIsCredit ? '+' : '-'}${toMoney(Math.abs(toNumber(entry.amount)))}
                         </td>
                         <td className="py-3 text-right text-white">
-                          ${(entry.balance_after || 0).toFixed(2)}
+                          ${toMoney(entry.balance_after)}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
