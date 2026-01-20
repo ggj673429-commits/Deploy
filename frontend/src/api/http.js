@@ -38,6 +38,7 @@ const http = axios.create({
 /**
  * Request Interceptor
  * - Adds auth token to all requests
+ * - Adds client timezone headers for server-side date calculations
  * - Uses ONLY localStorage["token"]
  */
 http.interceptors.request.use(
@@ -46,6 +47,23 @@ http.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    
+    // Add client timezone headers for device-local date calculations
+    try {
+      // IANA timezone name (e.g., "America/New_York", "Asia/Manila")
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (timezone) {
+        config.headers['X-Client-Timezone'] = timezone;
+      }
+      
+      // Timezone offset in minutes (note: getTimezoneOffset returns positive for west of UTC)
+      const offsetMinutes = new Date().getTimezoneOffset();
+      config.headers['X-Client-TZ-Offset'] = offsetMinutes.toString();
+    } catch (e) {
+      // Timezone detection failed - server will fallback to UTC
+      console.warn('Failed to detect client timezone:', e);
+    }
+    
     return config;
   },
   (error) => {
