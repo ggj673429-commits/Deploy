@@ -168,52 +168,27 @@ const ClientWallet = () => {
 
   const filteredTransactions = transactions.filter(tx => {
     if (filter === 'all') return true;
-    if (filter === 'deposits') return tx.type === 'IN' || tx.order_type?.includes('load') || tx.order_type?.includes('deposit');
-    if (filter === 'withdrawals') return tx.type === 'OUT' || tx.order_type?.includes('withdrawal');
-    if (filter === 'pending') return ['pending', 'pending_approval', 'pending_review', 'initiated', 'awaiting_payment_proof'].includes(tx.status);
+    if (filter === 'deposits') return isIncoming(tx);
+    if (filter === 'withdrawals') return !isIncoming(tx);
+    if (filter === 'pending') return isPendingStatus(tx.status);
     return true;
   });
 
   const getStatusIcon = (status) => {
-    switch (status) {
-      case 'approved':
-      case 'completed':
-      case 'credited':
-        return <Check className="w-4 h-4 text-emerald-400" />;
-      case 'pending':
-      case 'pending_approval':
-      case 'pending_review':
-      case 'initiated':
-      case 'awaiting_payment_proof':
-        return <Clock className="w-4 h-4 text-amber-400" />;
-      case 'failed':
-      case 'rejected':
-      case 'cancelled':
-        return <X className="w-4 h-4 text-red-400" />;
-      default:
-        return <AlertCircle className="w-4 h-4 text-gray-400" />;
+    if (isCompletedStatus(status)) {
+      return <Check className="w-4 h-4 text-emerald-400" />;
     }
+    if (isPendingStatus(status)) {
+      return <Clock className="w-4 h-4 text-amber-400" />;
+    }
+    if (isFailedStatus(status)) {
+      return <X className="w-4 h-4 text-red-400" />;
+    }
+    return <AlertCircle className="w-4 h-4 text-gray-400" />;
   };
 
   const getStatusColor = (status) => {
-    switch (status) {
-      case 'approved':
-      case 'completed':
-      case 'credited':
-        return 'text-emerald-400 bg-emerald-500/10';
-      case 'pending':
-      case 'pending_approval':
-      case 'pending_review':
-      case 'initiated':
-      case 'awaiting_payment_proof':
-        return 'text-amber-400 bg-amber-500/10';
-      case 'failed':
-      case 'rejected':
-      case 'cancelled':
-        return 'text-red-400 bg-red-500/10';
-      default:
-        return 'text-gray-400 bg-gray-500/10';
-    }
+    return getStatusColorClass(status);
   };
 
   const formatDate = (dateStr) => {
@@ -255,10 +230,10 @@ const ClientWallet = () => {
     );
   }
 
-  const totalBalance = walletData?.wallet_balance || walletData?.real_balance || 0;
+  const totalBalance = toNumber(walletData?.wallet_balance || walletData?.real_balance);
   const pendingAmount = transactions
-    .filter(t => ['pending', 'pending_approval', 'pending_review', 'initiated', 'awaiting_payment_proof'].includes(t.status))
-    .reduce((sum, t) => sum + (t.amount || 0), 0);
+    .filter(t => isPendingStatus(t.status))
+    .reduce((sum, t) => sum + toNumber(t.amount), 0);
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] pb-20" data-testid="client-wallet">
@@ -279,7 +254,7 @@ const ClientWallet = () => {
           <div className="relative">
             <p className="text-sm text-gray-400 mb-1">Available Balance</p>
             <h2 className="text-4xl font-bold text-white mb-6">
-              ${totalBalance.toFixed(2)}
+              ${toMoney(totalBalance)}
             </h2>
 
             {/* Balance Breakdown */}
@@ -287,19 +262,19 @@ const ClientWallet = () => {
               <div className="bg-white/5 rounded-xl p-3 text-center">
                 <p className="text-xs text-gray-500 mb-1">Cash</p>
                 <p className="text-sm font-semibold text-emerald-400">
-                  ${(walletData?.cash_balance || 0).toFixed(2)}
+                  ${toMoney(walletData?.cash_balance)}
                 </p>
               </div>
               <div className="bg-white/5 rounded-xl p-3 text-center">
                 <p className="text-xs text-gray-500 mb-1">Play Credits</p>
                 <p className="text-sm font-semibold text-violet-400">
-                  ${(walletData?.play_credits || 0).toFixed(2)}
+                  ${toMoney(walletData?.play_credits)}
                 </p>
               </div>
               <div className="bg-white/5 rounded-xl p-3 text-center">
                 <p className="text-xs text-gray-500 mb-1">Bonus</p>
                 <p className="text-sm font-semibold text-amber-400">
-                  ${(walletData?.bonus_balance || 0).toFixed(2)}
+                  ${toMoney(walletData?.bonus_balance)}
                 </p>
               </div>
             </div>
@@ -309,13 +284,13 @@ const ClientWallet = () => {
               <div>
                 <p className="text-xs text-gray-500">Withdrawable</p>
                 <p className="font-semibold text-emerald-400">
-                  ${(walletData?.withdrawable || walletData?.cash_balance || 0).toFixed(2)}
+                  ${toMoney(walletData?.withdrawable || walletData?.cash_balance)}
                 </p>
               </div>
               <div className="text-right">
                 <p className="text-xs text-gray-500">Pending</p>
                 <p className="font-semibold text-amber-400">
-                  ${pendingAmount.toFixed(2)}
+                  ${toMoney(pendingAmount)}
                 </p>
               </div>
             </div>
