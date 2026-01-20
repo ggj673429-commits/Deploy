@@ -1317,40 +1317,106 @@ async def update_global_rules(
     return {"success": True, "message": "Global rules updated"}
 
 
-# ==================== 7. REFERRALS ====================
+# ==================== 7. REFERRALS (MongoDB) ====================
 
 @router.get("/referrals/dashboard", summary="Referral dashboard")
 async def get_referral_dashboard(request: Request, authorization: str = Header(...)):
-    """Referral system overview"""
+    """Referral system overview using MongoDB"""
     auth = await require_admin_access(request, authorization)
     
-    stats = await fetch_one("""
-        SELECT 
-            COUNT(DISTINCT user_id) FILTER (WHERE referred_by_code IS NOT NULL) as referred_users,
-            COUNT(DISTINCT referred_by_code) FILTER (WHERE referred_by_code IS NOT NULL) as active_referrers
-        FROM users WHERE role = 'user'
-    """)
+    db = await get_db()
     
-    top_referrers = await fetch_all("""
-        SELECT u.username, u.referral_code, COUNT(r.user_id) as referral_count
-        FROM users u
-        LEFT JOIN users r ON r.referred_by_code = u.referral_code
-        WHERE u.role = 'user'
-        GROUP BY u.user_id, u.username, u.referral_code
-        HAVING COUNT(r.user_id) > 0
-        ORDER BY referral_count DESC
-        LIMIT 10
-    """)
+    # Get today's range and rolling windows for earnings
+    today_start, today_end = get_client_today_range(request)
+    rolling_7d_start, _ = get_rolling_window(request, 7)
+    rolling_30d_start, _ = get_rolling_window(request, 30)
+    
+    # Count referred users (users with referred_by_code)
+    referred_users = await db.users.count_documents({
+        "role": "user",
+        "referred_by_code": {"$exists": True, "$ne": None, "$ne": ""}
+    })
+    
+    # Count active referrers (users whose referral_code is used by others)
+    active_referrers_pipeline = [
+        {"$match": {"role": "user", "referred_by_code": {"$exists": True, "$ne": None, "$ne": ""}}},
+        {"$group": {"_id": "$referred_by_code"}},
+        {"$count": "count"}
+    ]
+    active_referrers_result = await db.users.aggregate(active_referrers_pipeline).to_list(1)
+    active_referrers = active_referrers_result[0]["count"] if active_referrers_result else 0
+    
+    # Top 10 referrers by referral count
+    top_referrers_pipeline = [
+        {"$match": {"role": "user", "referred_by_code": {"$exists": True, "$ne": None, "$ne": ""}}},
+        {"$group": {"_id": "$referred_by_code", "referral_count": {"$sum": 1}}},
+        {"$sort": {"referral_count": -1}},
+        {"$limit": 10},
+        {"$lookup": {
+            "from": "users",
+            "localField": "_id",
+            "foreignField": "referral_code",
+            "as": "referrer"
+        }},
+        {"$unwind": {"path": "$referrer", "preserveNullAndEmptyArrays": True}},
+        {"$project": {
+            "referral_code": "$_id",
+            "referral_count": 1,
+            "username": {"$ifNull": ["$referrer.username", "Unknown"]}
+        }}
+    ]
+    top_referrers = await db.users.aggregate(top_referrers_pipeline).to_list(10)
+    
+    # Referral earnings paid totals
+    paid_statuses = ["paid", "credited", "completed"]
+    
+    # Earnings today
+    earnings_today_pipeline = [
+        {"$match": {
+            "status": {"$in": paid_statuses},
+            "created_at": {"$gte": today_start, "$lte": today_end}
+        }},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]
+    earnings_today_result = await db.referral_earnings.aggregate(earnings_today_pipeline).to_list(1)
+    earnings_today = earnings_today_result[0]["total"] if earnings_today_result else 0
+    
+    # Earnings last 7 days
+    earnings_7d_pipeline = [
+        {"$match": {
+            "status": {"$in": paid_statuses},
+            "created_at": {"$gte": rolling_7d_start}
+        }},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]
+    earnings_7d_result = await db.referral_earnings.aggregate(earnings_7d_pipeline).to_list(1)
+    earnings_7d = earnings_7d_result[0]["total"] if earnings_7d_result else 0
+    
+    # Earnings last 30 days
+    earnings_30d_pipeline = [
+        {"$match": {
+            "status": {"$in": paid_statuses},
+            "created_at": {"$gte": rolling_30d_start}
+        }},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]
+    earnings_30d_result = await db.referral_earnings.aggregate(earnings_30d_pipeline).to_list(1)
+    earnings_30d = earnings_30d_result[0]["total"] if earnings_30d_result else 0
     
     return {
         "stats": {
-            "total_referred_users": stats['referred_users'],
-            "active_referrers": stats['active_referrers']
+            "total_referred_users": referred_users,
+            "active_referrers": active_referrers
+        },
+        "referral_earnings_paid": {
+            "today": round(float(earnings_today or 0), 2),
+            "last_7d": round(float(earnings_7d or 0), 2),
+            "last_30d": round(float(earnings_30d or 0), 2)
         },
         "top_referrers": [{
-            "username": r['username'],
-            "referral_code": r['referral_code'],
-            "referral_count": r['referral_count']
+            "username": r.get('username', 'Unknown'),
+            "referral_code": r.get('referral_code'),
+            "referral_count": r.get('referral_count', 0)
         } for r in top_referrers]
     }
 
@@ -1362,24 +1428,41 @@ async def get_referral_ledger(
     offset: int = 0,
     authorization: str = Header(...)
 ):
-    """List all referral relationships"""
+    """List all referral relationships using MongoDB"""
     auth = await require_admin_access(request, authorization)
     
-    referrals = await fetch_all("""
-        SELECT u.username as user, u.created_at, r.username as referrer, r.referral_code
-        FROM users u
-        JOIN users r ON u.referred_by_code = r.referral_code
-        WHERE u.referred_by_code IS NOT NULL
-        ORDER BY u.created_at DESC
-        LIMIT $1 OFFSET $2
-    """, limit, offset)
+    db = await get_db()
+    
+    # Get referred users with their referrer info
+    pipeline = [
+        {"$match": {"referred_by_code": {"$exists": True, "$ne": None, "$ne": ""}}},
+        {"$sort": {"created_at": -1}},
+        {"$skip": offset},
+        {"$limit": limit},
+        {"$lookup": {
+            "from": "users",
+            "localField": "referred_by_code",
+            "foreignField": "referral_code",
+            "as": "referrer"
+        }},
+        {"$unwind": {"path": "$referrer", "preserveNullAndEmptyArrays": True}},
+        {"$project": {
+            "_id": 0,
+            "user": "$username",
+            "referrer": {"$ifNull": ["$referrer.username", "Unknown"]},
+            "referral_code": "$referred_by_code",
+            "joined_at": "$created_at"
+        }}
+    ]
+    
+    referrals = await db.users.aggregate(pipeline).to_list(limit)
     
     return {
         "ledger": [{
-            "user": r['user'],
-            "referrer": r['referrer'],
-            "referral_code": r['referral_code'],
-            "joined_at": r['created_at'].isoformat() if r.get('created_at') else None
+            "user": r.get('user'),
+            "referrer": r.get('referrer'),
+            "referral_code": r.get('referral_code'),
+            "joined_at": r['joined_at'].isoformat() if r.get('joined_at') else None
         } for r in referrals]
     }
 
