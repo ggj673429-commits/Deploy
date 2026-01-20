@@ -49,60 +49,91 @@ async def require_admin_access(request: Request, authorization: str):
     return user
 
 
-# ==================== LAYER 1: EXECUTIVE SNAPSHOT ====================
+# ==================== LAYER 1: EXECUTIVE SNAPSHOT (MongoDB) ====================
 
 @router.get("/risk-snapshot", summary="Risk & Exposure Snapshot for Dashboard")
 async def get_risk_snapshot(request: Request, authorization: str = Header(...)):
     """
-    Risk & Exposure Snapshot (3 cards max for Dashboard)
+    Risk & Exposure Snapshot (3 cards max for Dashboard) - MongoDB
     - Total Client Balance (Cash + Bonus)
-    - Probable Max Cashout (worst-case projection)
+    - Risk Max 24h (MAX cap-based risk from last 24h deposits)
     - Cashout Pressure Indicator
     """
     auth = await require_admin_access(request, authorization)
     
+    db = await get_db()
+    
     # Total client balances
-    balances = await fetch_one("""
-        SELECT 
-            COALESCE(SUM(real_balance), 0) as total_cash,
-            COALESCE(SUM(bonus_balance), 0) as total_bonus,
-            COALESCE(SUM(play_credits), 0) as total_play_credits,
-            COALESCE(SUM(real_balance + bonus_balance + COALESCE(play_credits, 0)), 0) as total_combined
-        FROM users WHERE role = 'user' AND is_active = TRUE
-    """)
+    balances_pipeline = [
+        {"$match": {"role": "user", "is_active": True}},
+        {"$group": {
+            "_id": None,
+            "total_cash": {"$sum": {"$ifNull": ["$cash_balance", {"$ifNull": ["$real_balance", 0]}]}},
+            "total_bonus": {"$sum": {"$ifNull": ["$bonus_balance", 0]}},
+            "total_play_credits": {"$sum": {"$ifNull": ["$play_credits", 0]}},
+            "total_combined": {"$sum": {
+                "$add": [
+                    {"$ifNull": ["$cash_balance", {"$ifNull": ["$real_balance", 0]}]},
+                    {"$ifNull": ["$bonus_balance", 0]},
+                    {"$ifNull": ["$play_credits", 0]}
+                ]
+            }}
+        }}
+    ]
+    balances_result = await db.users.aggregate(balances_pipeline).to_list(1)
+    balances = balances_result[0] if balances_result else {
+        "total_cash": 0, "total_bonus": 0, "total_play_credits": 0, "total_combined": 0
+    }
     
     # Get system settings for multipliers
-    settings = await fetch_one("SELECT * FROM system_settings WHERE id = 'global'")
+    settings = await db.system_settings.find_one({"id": "global"})
     max_multiplier = float(settings.get('max_cashout_multiplier', 3) if settings else 3)
     
-    # Calculate probable max cashout
-    # Worst case: all users cashout at max multiplier
-    total_deposited = await fetch_one("""
-        SELECT COALESCE(SUM(total_deposited), 0) as total
-        FROM users WHERE role = 'user' AND is_active = TRUE
-    """)
+    # RISK MAX 24H (E) - MAX(deposit_amount * withdraw_cap_multiplier) from last 24h deposits
+    last_24h_start, last_24h_end = get_last_24h_range()
+    approved_statuses = ['approved', 'APPROVED_EXECUTED', 'completed', 'paid']
     
-    # Probable max is MIN of (balance, deposited * max_multiplier)
-    total_balance = float(balances['total_combined'] or 0)
-    probable_max_cashout = min(
-        total_balance,
-        float(total_deposited['total'] or 0) * max_multiplier
-    )
+    # Get last 24h deposits with their game info for per-game multiplier
+    deposits_24h_pipeline = [
+        {"$match": {
+            "order_type": {"$in": ["game_load", "deposit"]},
+            "status": {"$in": approved_statuses},
+            "approved_at": {"$gte": last_24h_start, "$lte": last_24h_end}
+        }},
+        {"$project": {
+            "amount": 1,
+            "game_name": 1,
+            "max_potential": {"$multiply": ["$amount", max_multiplier]}
+        }},
+        {"$group": {
+            "_id": None,
+            "risk_max": {"$max": "$max_potential"},
+            "total_deposits": {"$sum": "$amount"}
+        }}
+    ]
+    risk_result = await db.orders.aggregate(deposits_24h_pipeline).to_list(1)
+    risk_max_24h = risk_result[0]["risk_max"] if risk_result else 0
     
-    # Calculate pending withdrawals
-    pending_withdrawals = await fetch_one("""
-        SELECT 
-            COUNT(*) as count,
-            COALESCE(SUM(amount), 0) as total_amount
-        FROM orders 
-        WHERE order_type = 'withdrawal' AND status IN ('pending_review', 'awaiting_payment_proof')
-    """)
+    # Calculate pending withdrawals for pressure
+    pending_statuses = ['pending_review', 'awaiting_payment_proof', 'pending', 'initiated', 'PENDING_REVIEW']
+    pending_withdrawals_pipeline = [
+        {"$match": {
+            "order_type": {"$in": ["withdrawal", "withdrawal_game", "wallet_redeem"]},
+            "status": {"$in": pending_statuses}
+        }},
+        {"$group": {
+            "_id": None,
+            "count": {"$sum": 1},
+            "total_amount": {"$sum": {"$ifNull": ["$amount", 0]}}
+        }}
+    ]
+    pending_result = await db.orders.aggregate(pending_withdrawals_pipeline).to_list(1)
+    pending_count = pending_result[0]["count"] if pending_result else 0
+    pending_amount = pending_result[0]["total_amount"] if pending_result else 0
     
     # Cashout pressure indicator
-    # Low: < 20% of balance in pending
-    # Medium: 20-50% of balance in pending
-    # High: > 50% of balance in pending
-    pending_ratio = (float(pending_withdrawals['total_amount'] or 0) / total_balance * 100) if total_balance > 0 else 0
+    total_balance = float(balances.get('total_combined', 0))
+    pending_ratio = (float(pending_amount) / total_balance * 100) if total_balance > 0 else 0
     
     if pending_ratio < 20:
         pressure = "low"
@@ -113,19 +144,24 @@ async def get_risk_snapshot(request: Request, authorization: str = Header(...)):
     
     return {
         "total_client_balance": {
-            "cash": round(float(balances['total_cash'] or 0), 2),
-            "bonus": round(float(balances['total_bonus'] or 0), 2),
-            "play_credits": round(float(balances['total_play_credits'] or 0), 2),
+            "cash": round(float(balances.get('total_cash', 0)), 2),
+            "bonus": round(float(balances.get('total_bonus', 0)), 2),
+            "play_credits": round(float(balances.get('total_play_credits', 0)), 2),
             "combined": round(total_balance, 2)
         },
+        "risk_max_24h": {
+            "amount": round(float(risk_max_24h or 0), 2),
+            "max_multiplier_used": max_multiplier,
+            "description": "MAX(deposit_amount * multiplier) from last 24h deposits"
+        },
         "probable_max_cashout": {
-            "amount": round(probable_max_cashout, 2),
+            "amount": round(min(total_balance, float(risk_max_24h or 0)), 2),
             "max_multiplier_used": max_multiplier
         },
         "cashout_pressure": {
             "indicator": pressure,
-            "pending_count": pending_withdrawals['count'],
-            "pending_amount": round(float(pending_withdrawals['total_amount'] or 0), 2),
+            "pending_count": pending_count,
+            "pending_amount": round(float(pending_amount), 2),
             "pressure_ratio_percent": round(pending_ratio, 1)
         }
     }
