@@ -141,11 +141,11 @@ async def authenticate_user(username: str, password: str) -> Tuple[bool, Dict[st
             "lockout_remaining": lockout_remaining
         }
     
-    # Get user
-    user = await fetch_one(
-        "SELECT * FROM users WHERE username = $1",
-        username
-    )
+    # Get user from MongoDB
+    from ..core.database import get_db, serialize_doc
+    db = await get_db()
+    user = await db.users.find_one({"username": username})
+    user = serialize_doc(user)
     
     if not user:
         record_failed_attempt(username)
