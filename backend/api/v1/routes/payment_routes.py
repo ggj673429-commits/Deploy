@@ -11,7 +11,7 @@ import uuid
 import json
 import logging
 
-from ..core.database import fetch_one, fetch_all, execute, get_pool
+from ..core.database import get_db, serialize_doc, serialize_docs, get_timestamp
 from ..core.config import get_api_settings
 from ..core.notification_router import emit_event, EventType
 from .dependencies import check_rate_limiting, require_auth
