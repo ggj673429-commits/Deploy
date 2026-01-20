@@ -12,21 +12,15 @@
 import axios from 'axios';
 
 // Environment-based API URL - SINGLE SOURCE
-// Priority 1: Use REACT_APP_BACKEND_URL if explicitly set
-// Priority 2: Use proxy (same-origin) only in development when proxy is configured
+// Priority 1: Use REACT_APP_BACKEND_URL if set
+// Priority 2: Use same-origin (empty string) for CRA proxy in dev
 const getApiBaseUrl = () => {
   // Explicit env var takes precedence
   if (process.env.REACT_APP_BACKEND_URL) {
     return process.env.REACT_APP_BACKEND_URL;
   }
   
-  // In development with proxy configured, use same-origin (empty string)
-  // In production or when no proxy, must have REACT_APP_BACKEND_URL set
-  if (process.env.NODE_ENV === 'development' && process.env.PROXY) {
-    return ''; // Same-origin, proxy will forward to backend
-  }
-  
-  // Fallback: same-origin (works when frontend and backend share same host via ingress)
+  // Same-origin (works with CRA proxy in dev, or when frontend/backend share host)
   return '';
 };
 
