@@ -6,11 +6,12 @@
  * - Uses ONLY src/api/http.js for API calls
  * - Exposes: login(), logout(), isAuthenticated, user, role, serverUnavailable
  * - On network failure during validation, sets serverUnavailable flag (does NOT logout)
- * - On auth failure (401), clears token
+ * - On explicit 401 invalid/expired, clears token
+ * - Handles both validate-token response schemas for compatibility
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import http, { getErrorMessage, isServerUnavailable } from '../api/http';
+import http, { getErrorMessage, isServerUnavailable, formatLockoutTime } from '../api/http';
 
 const AuthContext = createContext(null);
 
@@ -33,6 +34,40 @@ export const AuthProvider = ({ children }) => {
   // Get token from localStorage
   const getToken = useCallback(() => localStorage.getItem('token'), []);
 
+  /**
+   * Parse user from validate-token response
+   * Handles both response schemas:
+   * 1) { valid: true, user: { id, username, role } }
+   * 2) { valid: true, user_id, username, role }
+   */
+  const parseValidateTokenResponse = (data) => {
+    if (!data.valid) return null;
+    
+    // Schema 1: { valid: true, user: {...} }
+    if (data.user && typeof data.user === 'object') {
+      return {
+        user_id: data.user.user_id || data.user.id,
+        username: data.user.username,
+        display_name: data.user.display_name || data.user.username,
+        role: data.user.role || 'user',
+        referral_code: data.user.referral_code,
+      };
+    }
+    
+    // Schema 2: { valid: true, user_id, username, role }
+    if (data.user_id && data.username) {
+      return {
+        user_id: data.user_id,
+        username: data.username,
+        display_name: data.display_name || data.username,
+        role: data.role || 'user',
+        referral_code: data.referral_code,
+      };
+    }
+    
+    return null;
+  };
+
   // Validate token on app load
   useEffect(() => {
     const initAuth = async () => {
@@ -53,14 +88,17 @@ export const AuthProvider = ({ children }) => {
       try {
         const response = await http.post('/auth/validate-token');
         
-        if (response.data.valid && response.data.user) {
-          setUser(response.data.user);
+        const userData = parseValidateTokenResponse(response.data);
+        if (userData) {
+          setUser(userData);
           setServerUnavailable(false);
           // Update stored user data
-          localStorage.setItem('user', JSON.stringify(response.data.user));
+          localStorage.setItem('user', JSON.stringify(userData));
         } else {
-          // Invalid token - clear it
+          // Invalid response format - clear token
+          console.warn('Invalid validate-token response format', response.data);
           localStorage.removeItem('token');
+          localStorage.removeItem('user');
           setUser(null);
         }
       } catch (error) {
@@ -77,14 +115,15 @@ export const AuthProvider = ({ children }) => {
               // Invalid JSON, ignore
             }
           }
-        } else if (error.isAuthError) {
-          // Auth error (401) - token is invalid, clear it
+        } else if (error.isAuthError && error.status === 401) {
+          // Explicit 401 invalid/expired token - clear it
+          console.log('Token invalid or expired, logging out');
           localStorage.removeItem('token');
           localStorage.removeItem('user');
           setUser(null);
         } else {
           // Other error (4xx, transient failures) - DON'T clear token
-          // Keep user logged in, they can retry. Only 401 should force logout.
+          // Keep user logged in, they can retry. Only explicit 401 should force logout.
           console.warn('Token validation failed (non-auth error), keeping session:', error.message);
           // Try to restore user from localStorage
           const storedUser = localStorage.getItem('user');
@@ -119,10 +158,11 @@ export const AuthProvider = ({ children }) => {
       
       const { access_token, user: userData } = response.data;
       
-      // Store token and user
+      // Store token FIRST, then set user state
       localStorage.setItem('token', access_token);
       localStorage.setItem('user', JSON.stringify(userData));
       
+      // Update state
       setUser(userData);
       setServerUnavailable(false);
       
@@ -135,10 +175,18 @@ export const AuthProvider = ({ children }) => {
         setServerUnavailable(true);
       }
       
+      // Format lockout message if present
+      let finalMessage = message;
+      if (error.lockout_remaining) {
+        const timeStr = formatLockoutTime(error.lockout_remaining);
+        finalMessage = `Account temporarily locked. Try again in ${timeStr}.`;
+      }
+      
       return { 
         success: false, 
-        message,
+        message: finalMessage,
         isNetworkError: isNetwork,
+        lockout_remaining: error.lockout_remaining,
       };
     }
   };
@@ -181,15 +229,16 @@ export const AuthProvider = ({ children }) => {
         headers: { Authorization: `Bearer ${token}` }
       });
       
-      if (response.data.valid && response.data.user) {
+      const userData = parseValidateTokenResponse(response.data);
+      if (userData) {
         // Store token and user
         localStorage.setItem('token', token);
-        localStorage.setItem('user', JSON.stringify(response.data.user));
+        localStorage.setItem('user', JSON.stringify(userData));
         
-        setUser(response.data.user);
+        setUser(userData);
         setServerUnavailable(false);
         
-        return { success: true, user: response.data.user };
+        return { success: true, user: userData };
       }
       
       return { success: false, message: 'Invalid or expired token' };

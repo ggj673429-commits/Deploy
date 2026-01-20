@@ -12,8 +12,25 @@
 import axios from 'axios';
 
 // Environment-based API URL - SINGLE SOURCE
-// Use env variable if set, otherwise use current origin (platform handles routing via ingress)
-const API_BASE_URL = process.env.REACT_APP_BACKEND_URL || '';
+// Priority 1: Use REACT_APP_BACKEND_URL if explicitly set
+// Priority 2: Use proxy (same-origin) only in development when proxy is configured
+const getApiBaseUrl = () => {
+  // Explicit env var takes precedence
+  if (process.env.REACT_APP_BACKEND_URL) {
+    return process.env.REACT_APP_BACKEND_URL;
+  }
+  
+  // In development with proxy configured, use same-origin (empty string)
+  // In production or when no proxy, must have REACT_APP_BACKEND_URL set
+  if (process.env.NODE_ENV === 'development' && process.env.PROXY) {
+    return ''; // Same-origin, proxy will forward to backend
+  }
+  
+  // Fallback: same-origin (works when frontend and backend share same host via ingress)
+  return '';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 // Create axios instance with defaults
 const http = axios.create({
@@ -56,8 +73,20 @@ http.interceptors.response.use(
 );
 
 /**
+ * Check if the request is to an auth endpoint
+ */
+function isAuthEndpoint(error) {
+  if (!error.config?.url) return false;
+  const url = error.config.url;
+  return url.includes('/auth/login') || 
+         url.includes('/auth/signup') || 
+         url.includes('/auth/register') ||
+         url.includes('/auth/validate-token');
+}
+
+/**
  * Normalize any error into a safe, UI-friendly format
- * @returns {{ message: string, error_code: string, status?: number, isNetworkError: boolean, isAuthError: boolean }}
+ * @returns {{ message: string, error_code: string, status?: number, isNetworkError: boolean, isAuthError: boolean, lockout_remaining?: number }}
  */
 function normalizeError(error) {
   // Network error (no response at all)
@@ -65,7 +94,7 @@ function normalizeError(error) {
     const isTimeout = error.code === 'ECONNABORTED';
     const message = isTimeout 
       ? 'Request timed out. Please try again.'
-      : 'Server temporarily unavailable. Please try again.';
+      : 'Server unreachable. Please check your connection.';
     
     return {
       message,
@@ -89,8 +118,23 @@ function normalizeError(error) {
     };
   }
 
-  // 401 Unauthorized
+  // 401 Unauthorized - SPECIAL HANDLING FOR AUTH ENDPOINTS
   if (status === 401) {
+    // For auth endpoints (login, signup, validate-token), preserve backend message
+    if (isAuthEndpoint(error)) {
+      const backendMessage = extractErrorMessage(data);
+      return {
+        message: backendMessage,
+        error_code: data?.error_code || 'E_AUTH',
+        status,
+        isNetworkError: false,
+        isAuthError: true,
+        lockout_remaining: data?.lockout_remaining || data?.lockout_remaining_seconds,
+        ...data, // Preserve all backend fields
+      };
+    }
+    
+    // For protected endpoints, use generic session expired message
     return {
       message: 'Session expired. Please login again.',
       error_code: 'E_AUTH',
@@ -100,10 +144,24 @@ function normalizeError(error) {
     };
   }
 
+  // 429 Too Many Requests (brute force lockout)
+  if (status === 429) {
+    const backendMessage = extractErrorMessage(data);
+    return {
+      message: backendMessage,
+      error_code: data?.error_code || 'E_RATE_LIMIT',
+      status,
+      isNetworkError: false,
+      isAuthError: false,
+      lockout_remaining: data?.lockout_remaining || data?.lockout_remaining_seconds,
+      ...data,
+    };
+  }
+
   // 403 Forbidden
   if (status === 403) {
     return {
-      message: 'Access denied.',
+      message: extractErrorMessage(data, 'Access denied.'),
       error_code: 'E_FORBIDDEN',
       status,
       isNetworkError: false,
@@ -116,7 +174,7 @@ function normalizeError(error) {
 
   return {
     message,
-    error_code: 'E_API',
+    error_code: data?.error_code || 'E_API',
     status,
     isNetworkError: false,
     isAuthError: false,
@@ -142,7 +200,13 @@ function extractErrorMessage(data, fallback = 'Something went wrong. Please try 
   
   // Priority 2: FastAPI detail field
   if (data.detail) {
+    // String detail
     if (typeof data.detail === 'string') return data.detail;
+    
+    // Object with message field
+    if (typeof data.detail === 'object' && data.detail.message) {
+      return data.detail.message;
+    }
     
     // Pydantic validation errors (array)
     if (Array.isArray(data.detail)) {
@@ -191,6 +255,7 @@ export async function safeApiCall(apiCall, options = {}) {
       success: false,
       isNetworkError: error.isNetworkError || false,
       isAuthError: error.isAuthError || false,
+      lockout_remaining: error.lockout_remaining,
     };
   }
 }
@@ -223,6 +288,20 @@ export function getErrorMessage(error, fallback = 'Something went wrong. Please 
  */
 export function isServerUnavailable(error) {
   return error?.isNetworkError === true || error?.error_code === 'E_NET' || error?.error_code === 'E_SERVER';
+}
+
+/**
+ * Format lockout remaining time
+ */
+export function formatLockoutTime(seconds) {
+  if (!seconds || seconds < 0) return '';
+  
+  if (seconds < 60) {
+    return `${seconds} second${seconds !== 1 ? 's' : ''}`;
+  }
+  
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
 }
 
 // Export the configured instance
