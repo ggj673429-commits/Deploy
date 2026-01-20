@@ -155,6 +155,17 @@ async def _create_indexes():
         await db.referral_tiers.create_index("tier_id", unique=True)
         await db.referral_tiers.create_index("tier_level", unique=True)
         
+        # Payment methods indexes
+        await db.payment_methods.create_index("method_id", unique=True)
+        await db.payment_methods.create_index("enabled")
+        await db.payment_methods.create_index("priority")
+        
+        # Payment QR indexes
+        await db.payment_qr.create_index("qr_id", unique=True)
+        await db.payment_qr.create_index("payment_method")
+        await db.payment_qr.create_index([("payment_method", 1), ("is_active", 1)])
+        await db.payment_qr.create_index([("payment_method", 1), ("is_default", 1)])
+        
         logger.info("✅ All indexes created successfully")
         
     except Exception as e:
