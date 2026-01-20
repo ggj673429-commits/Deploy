@@ -193,8 +193,14 @@ export const AuthProvider = ({ children }) => {
 
   /**
    * Register new user
+   * Returns:
+   * - { success: true, user } on full success (signup + auto-login)
+   * - { success: true, mode: 'signup_only', username } when signup succeeded but login failed
+   * - { success: false, message } on signup failure
    */
   const register = async (username, password, displayName, referralCode) => {
+    // Step 1: Attempt signup
+    let signupSucceeded = false;
     try {
       const response = await http.post('/auth/signup', {
         username,
@@ -204,17 +210,49 @@ export const AuthProvider = ({ children }) => {
       });
       
       if (!response.data.success) {
-        throw new Error(response.data.message || 'Registration failed');
+        // Signup failed - return the backend error
+        return { 
+          success: false, 
+          message: response.data.message || 'Registration failed',
+        };
       }
       
-      // Auto-login after registration
-      return await login(username, password);
+      signupSucceeded = true;
     } catch (error) {
+      // Signup failed - preserve backend message
       const message = getErrorMessage(error, 'Registration failed');
       return { 
         success: false, 
         message,
         isNetworkError: isServerUnavailable(error),
+      };
+    }
+    
+    // Step 2: Signup succeeded, attempt auto-login
+    try {
+      const loginResult = await login(username, password);
+      
+      if (loginResult.success) {
+        // Full success - signup + login worked
+        return loginResult;
+      }
+      
+      // Login failed after successful signup
+      // Return success with mode='signup_only' so UI can handle gracefully
+      return {
+        success: true,
+        mode: 'signup_only',
+        username,
+        message: 'Account created successfully. Please sign in.',
+      };
+    } catch (error) {
+      // Login threw an error after successful signup
+      // Still a "success" from signup perspective
+      return {
+        success: true,
+        mode: 'signup_only',
+        username,
+        message: 'Account created successfully. Please sign in.',
       };
     }
   };
