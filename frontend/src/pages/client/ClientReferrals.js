@@ -46,7 +46,8 @@ const StatusBadge = ({ status }) => {
     inactive: { bg: 'bg-gray-500/10', text: 'text-gray-400', label: 'Inactive' },
   };
 
-  const config = statusConfig[status?.toLowerCase()] || statusConfig.pending;
+  const normalizedStatus = normStatus(status);
+  const config = statusConfig[normalizedStatus] || statusConfig.pending;
 
   return (
     <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium ${config.bg} ${config.text}`}>
@@ -243,8 +244,7 @@ const ClientReferrals = () => {
 
   // Safe number formatting
   const formatCurrency = (value) => {
-    const num = typeof value === 'number' ? value : 0;
-    return `$${num.toFixed(2)}`;
+    return `$${toMoney(value)}`;
   };
 
   if (loading) {
@@ -474,9 +474,9 @@ const ClientReferrals = () => {
                     className="grid grid-cols-4 gap-2 px-4 py-3 items-center"
                   >
                     <div className="text-sm font-medium text-white truncate">{String(earning.friend || 'N/A')}</div>
-                    <div className="text-sm text-gray-400 text-right">${earning.deposit_amount || 0}</div>
+                    <div className="text-sm text-gray-400 text-right">${toMoney(earning.deposit_amount)}</div>
                     <div className="text-sm font-medium text-emerald-400 text-right">
-                      ${(earning.reward_earned || 0).toFixed(2)}
+                      ${toMoney(earning.reward_earned)}
                     </div>
                     <div className="text-center">
                       <StatusBadge status={earning.status} />
