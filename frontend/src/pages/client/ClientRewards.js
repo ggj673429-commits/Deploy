@@ -219,7 +219,7 @@ const ClientRewards = () => {
                   </div>
                   <div>
                     <h3 className="font-bold text-white">
-                      ${welcomeCredit.amount?.toFixed(2) || '5.00'} Welcome Bonus
+                      ${toMoney(welcomeCredit.amount, 5)} Welcome Bonus
                     </h3>
                     <p className="text-sm text-amber-300/80">
                       Claim your free credits!
@@ -341,19 +341,22 @@ const ClientRewards = () => {
                   </p>
                 ) : (
                   <div className="space-y-2 max-h-40 overflow-y-auto">
-                    {promoHistory.map((item, idx) => (
+                    {promoHistory.map((item, idx) => {
+                      const itemDate = safeDate(item.redeemed_at || item.created_at);
+                      return (
                       <div key={idx} className="flex items-center justify-between p-2 bg-white/5 rounded-lg">
                         <div>
                           <p className="font-mono text-sm text-white">{item.code}</p>
                           <p className="text-xs text-gray-500">
-                            {new Date(item.redeemed_at || item.created_at).toLocaleDateString()}
+                            {itemDate ? itemDate.toLocaleDateString() : 'Unknown date'}
                           </p>
                         </div>
                         <span className="text-emerald-400 font-semibold">
-                          +${item.amount?.toFixed(2) || item.credit_amount?.toFixed(2) || '0.00'}
+                          +${toMoney(item.amount || item.credit_amount)}
                         </span>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -382,19 +385,19 @@ const ClientRewards = () => {
                   <div>
                     <p className="text-xs text-gray-500">Total Referrals</p>
                     <p className="text-lg font-bold text-white">
-                      {referralStats?.total_referrals || 0}
+                      {toNumber(referralStats?.total_referrals)}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-500">Total Earned</p>
                     <p className="text-lg font-bold text-emerald-400">
-                      ${(referralStats?.total_earned || 0).toFixed(2)}
+                      ${toMoney(referralStats?.total_earned)}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-500">Pending</p>
                     <p className="text-lg font-bold text-amber-400">
-                      ${(referralStats?.pending_rewards || 0).toFixed(2)}
+                      ${toMoney(referralStats?.pending_rewards)}
                     </p>
                   </div>
                 </div>
@@ -440,7 +443,7 @@ const ClientRewards = () => {
                   </div>
                   {reward.amount && (
                     <span className="text-emerald-400 font-bold">
-                      ${reward.amount.toFixed(2)}
+                      ${toMoney(reward.amount)}
                     </span>
                   )}
                 </div>
@@ -450,7 +453,7 @@ const ClientRewards = () => {
         </section>
       </main>
 
-      <ClientBottomNav active="profile" />
+      <ClientBottomNav active="rewards" />
     </div>
   );
 };
