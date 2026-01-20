@@ -22,6 +22,7 @@ import {
 // API
 import { rewardsApi, referralsApi, getErrorMessage } from '../../api';
 import { ClientBottomNav } from '../../features/shared/ClientBottomNav';
+import { toNumber, toMoney, safeDate } from '../../utils/normalize';
 
 // Loading skeleton component
 const Skeleton = ({ className = '' }) => (

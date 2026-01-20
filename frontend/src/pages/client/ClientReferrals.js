@@ -26,6 +26,7 @@ import { referralsApi, getErrorMessage, isServerUnavailable } from '../../api';
 import { ClientBottomNav } from '../../features/shared/ClientBottomNav';
 import { PageLoader } from '../../features/shared/LoadingStates';
 import { ErrorState } from '../../features/shared/EmptyStates';
+import { toNumber, toMoney, normStatus } from '../../utils/normalize';
 
 // Progress Steps
 const PROGRESS_STEPS = [
