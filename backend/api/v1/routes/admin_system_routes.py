@@ -278,7 +278,7 @@ async def delete_api_key(
     return {"message": "API key revoked successfully"}
 
 
-# ==================== PAYMENT METHODS CRUD ====================
+# ==================== PAYMENT METHODS CRUD (MongoDB Native) ====================
 
 @router.get("/payment-methods")
 async def list_payment_methods(
@@ -288,13 +288,11 @@ async def list_payment_methods(
     """List all payment methods"""
     await require_admin_access(request, authorization)
     
-    methods = await fetch_all("""
-        SELECT method_id, title, tags, instructions, enabled, priority, rotation_enabled, created_at
-        FROM payment_methods
-        ORDER BY priority DESC, created_at DESC
-    """)
+    db = await get_db()
+    cursor = db.payment_methods.find({}, {"_id": 0}).sort([("priority", -1), ("created_at", -1)])
+    methods = await cursor.to_list(length=None)
     
-    return {"payment_methods": [dict(m) for m in methods]}
+    return {"payment_methods": serialize_docs(methods)}
 
 
 @router.post("/payment-methods")
@@ -306,12 +304,24 @@ async def create_payment_method(
     """Create a new payment method"""
     auth = await require_admin_access(request, authorization)
     
+    db = await get_db()
     method_id = str(uuid.uuid4())
+    now = get_timestamp()
     
-    await execute("""
-        INSERT INTO payment_methods (method_id, title, tags, instructions, enabled, priority, rotation_enabled, created_by, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-    """, method_id, data.title, data.tags, data.instructions, data.enabled, data.priority, data.rotation_enabled, auth.user_id)
+    method_doc = {
+        "method_id": method_id,
+        "title": data.title,
+        "tags": data.tags,
+        "instructions": data.instructions,
+        "enabled": data.enabled,
+        "priority": data.priority,
+        "rotation_enabled": data.rotation_enabled,
+        "created_by": auth.user_id,
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    await db.payment_methods.insert_one(method_doc)
     
     return {"method_id": method_id, "message": "Payment method created successfully"}
 
@@ -326,48 +336,38 @@ async def update_payment_method(
     """Update a payment method"""
     await require_admin_access(request, authorization)
     
-    # Build update query dynamically
-    updates = []
-    params = []
-    param_idx = 1
+    db = await get_db()
+    
+    # Check if method exists
+    existing = await db.payment_methods.find_one({"method_id": method_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Payment method not found")
+    
+    # Build update dict dynamically
+    update_fields = {}
     
     if data.title is not None:
-        updates.append(f"title = ${param_idx}")
-        params.append(data.title)
-        param_idx += 1
-    
+        update_fields["title"] = data.title
     if data.tags is not None:
-        updates.append(f"tags = ${param_idx}")
-        params.append(data.tags)
-        param_idx += 1
-    
+        update_fields["tags"] = data.tags
     if data.instructions is not None:
-        updates.append(f"instructions = ${param_idx}")
-        params.append(data.instructions)
-        param_idx += 1
-    
+        update_fields["instructions"] = data.instructions
     if data.enabled is not None:
-        updates.append(f"enabled = ${param_idx}")
-        params.append(data.enabled)
-        param_idx += 1
-    
+        update_fields["enabled"] = data.enabled
     if data.priority is not None:
-        updates.append(f"priority = ${param_idx}")
-        params.append(data.priority)
-        param_idx += 1
-    
+        update_fields["priority"] = data.priority
     if data.rotation_enabled is not None:
-        updates.append(f"rotation_enabled = ${param_idx}")
-        params.append(data.rotation_enabled)
-        param_idx += 1
+        update_fields["rotation_enabled"] = data.rotation_enabled
     
-    if not updates:
+    if not update_fields:
         raise HTTPException(status_code=400, detail="No fields to update")
     
-    params.append(method_id)
-    query = f"UPDATE payment_methods SET {', '.join(updates)} WHERE method_id = ${param_idx}"
+    update_fields["updated_at"] = get_timestamp()
     
-    await execute(query, *params)
+    await db.payment_methods.update_one(
+        {"method_id": method_id},
+        {"$set": update_fields}
+    )
     
     return {"message": "Payment method updated successfully"}
 
@@ -381,7 +381,11 @@ async def delete_payment_method(
     """Delete a payment method"""
     await require_admin_access(request, authorization)
     
-    await execute("DELETE FROM payment_methods WHERE method_id = $1", method_id)
+    db = await get_db()
+    result = await db.payment_methods.delete_one({"method_id": method_id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Payment method not found")
     
     return {"message": "Payment method deleted successfully"}
 
