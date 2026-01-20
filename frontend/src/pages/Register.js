@@ -1,16 +1,14 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
 import { UserPlus, Eye, EyeOff, Mail, User, Lock, Gift, AlertCircle } from 'lucide-react';
-import { getErrorMessage } from '../utils/errorHandler';
-
-// Centralized API
-import { authApi } from '../api/endpoints';
 
 const Register = () => {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const [searchParams] = useSearchParams();
+  const { register: registerUser } = useAuth();
+  
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,6 +17,15 @@ const Register = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Auto-fill referral code from URL query parameter
+  useEffect(() => {
+    const refParam = searchParams.get('ref');
+    if (refParam) {
+      const normalized = refParam.trim().toUpperCase();
+      setReferralCode(normalized);
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -36,19 +43,23 @@ const Register = () => {
     setLoading(true);
     
     try {
-      await authApi.signup({
-        username,
-        email: email || undefined,
-        password,
-        referral_code: referralCode || undefined
-      });
+      // Use AuthContext.register which calls the correct API
+      const normalizedReferralCode = referralCode.trim().toUpperCase();
+      const result = await registerUser(
+        username, 
+        password, 
+        email || username,  // displayName
+        normalizedReferralCode || null
+      );
       
-      // Auto-login after registration
-      await login(username, password);
-      toast.success('Account created successfully! Welcome!');
-      navigate('/client/home');
+      if (result.success) {
+        toast.success('Account created successfully! Welcome!');
+        navigate('/client/home');
+      } else {
+        toast.error(result.message || 'Failed to create account');
+      }
     } catch (error) {
-      toast.error(getErrorMessage(error, 'Failed to create account'));
+      toast.error(error.message || 'Failed to create account');
     } finally {
       setLoading(false);
     }
@@ -187,7 +198,7 @@ const Register = () => {
               <input
                 type="text"
                 value={referralCode}
-                onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                onChange={(e) => setReferralCode(e.target.value.trim().toUpperCase())}
                 className="w-full px-4 py-3 pl-11 bg-black border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 transition-colors"
                 placeholder="Enter referral code"
                 data-testid="register-referral"

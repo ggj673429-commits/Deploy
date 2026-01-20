@@ -18,7 +18,7 @@ import { toast } from 'sonner';
 import { 
   Users, Copy, Check, TrendingUp, Clock, UserPlus,
   ChevronDown, ChevronUp, Send, MessageCircle, Gift, Wallet,
-  Info, Share2, CheckCircle2, RefreshCw
+  Info, Share2, CheckCircle2, RefreshCw, AlertTriangle
 } from 'lucide-react';
 
 // Centralized API
@@ -183,28 +183,14 @@ const ClientReferrals = () => {
       setReferralData(response.data);
     } catch (err) {
       const message = getErrorMessage(err, 'Failed to load referrals');
+      setError(message);
       
-      if (isServerUnavailable(err)) {
-        setError(message);
-      } else {
-        // Set demo data for fallback
-        setReferralData({
-          referral_code: user?.referral_code || 'DEMO2024',
-          referral_link: `${window.location.origin}/register?ref=${user?.referral_code || 'DEMO2024'}`,
-          stats: {
-            total_referrals: 0,
-            active_referrals: 0,
-            total_earned: 0,
-            pending_rewards: 0
-          },
-          referrals: [],
-          earnings: []
-        });
-      }
+      // DO NOT set fake zeros - show error state instead
+      // This allows user to see there's an actual problem
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     fetchReferralData();
@@ -264,6 +250,7 @@ const ClientReferrals = () => {
     return <PageLoader message="Loading referrals..." />;
   }
 
+  // Show error state if API call failed - DO NOT mask with zeros
   if (error && !referralData) {
     return (
       <div className="min-h-screen bg-[#0a0a0f] pb-20" data-testid="client-referrals">
@@ -273,11 +260,18 @@ const ClientReferrals = () => {
           </div>
         </header>
         <main className="px-4 py-6">
-          <ErrorState 
-            title="Could not load referrals" 
-            description={error}
-            onRetry={fetchReferralData} 
-          />
+          <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-6 text-center">
+            <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-4" />
+            <h3 className="text-white font-semibold mb-2">Failed to Load Referral Data</h3>
+            <p className="text-gray-400 text-sm mb-4">{error}</p>
+            <button
+              onClick={fetchReferralData}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-500 transition-colors"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Retry
+            </button>
+          </div>
         </main>
         <ClientBottomNav active="referrals" />
       </div>
