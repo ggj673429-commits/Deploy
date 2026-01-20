@@ -5,10 +5,16 @@
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { DollarSign, TrendingUp, AlertTriangle, ChevronRight } from 'lucide-react';
+import { DollarSign, TrendingUp, AlertTriangle, ChevronRight, Clock } from 'lucide-react';
 
 // Centralized Admin API
 import { analyticsApi } from '../../api/admin';
+
+// Helper: Safe money formatting
+const toMoney = (value) => {
+  const num = Number(value || 0);
+  return isNaN(num) ? 0 : num;
+};
 
 const RiskSnapshotCards = () => {
   const [loading, setLoading] = useState(true);
@@ -20,7 +26,6 @@ const RiskSnapshotCards = () => {
       setData(response.data);
     } catch (err) {
       console.error('Failed to fetch risk snapshot:', err);
-      // Graceful degradation - show empty state
       setData(null);
     } finally {
       setLoading(false);
@@ -44,7 +49,6 @@ const RiskSnapshotCards = () => {
     );
   }
 
-  // If data failed to load, show minimal fallback
   if (!data) {
     return (
       <div data-testid="risk-snapshot-cards">
@@ -72,7 +76,6 @@ const RiskSnapshotCards = () => {
 
   return (
     <div data-testid="risk-snapshot-cards">
-      {/* Section Header */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-white flex items-center gap-2">
           <AlertTriangle className="w-5 h-5 text-orange-400" />
@@ -83,53 +86,52 @@ const RiskSnapshotCards = () => {
         </Link>
       </div>
 
-      {/* 3 Risk Cards */}
       <div className="grid grid-cols-3 gap-4">
         {/* Card 1: Total Client Balance */}
-        <Link to="/admin/reports?tab=risk" className="group">
+        <Link to="/admin/reports?tab=risk" className="group" data-testid="total-client-balance-card">
           <div className="bg-gray-900/50 border border-gray-800 hover:border-blue-500/30 rounded-xl p-5 transition-all h-full">
             <div className="flex items-center justify-between mb-3">
               <span className="text-blue-400/80 text-sm font-medium">Total Client Balance</span>
               <DollarSign className="w-4 h-4 text-blue-400" />
             </div>
-            <p className="text-2xl font-bold text-white mb-1">
-              ${data?.total_client_balance?.combined?.toLocaleString() || '0'}
+            <p className="text-2xl font-bold text-white mb-1" data-testid="total-client-balance-value">
+              ${toMoney(data?.total_client_balance?.combined).toLocaleString()}
             </p>
             <p className="text-gray-500 text-xs">
-              Cash: ${data?.total_client_balance?.cash?.toLocaleString() || '0'} • 
-              Bonus: ${data?.total_client_balance?.bonus?.toLocaleString() || '0'}
+              Cash: ${toMoney(data?.total_client_balance?.cash).toLocaleString()} • 
+              Bonus: ${toMoney(data?.total_client_balance?.bonus).toLocaleString()}
             </p>
           </div>
         </Link>
 
-        {/* Card 2: Probable Max Cashout */}
-        <Link to="/admin/reports?tab=risk" className="group">
+        {/* Card 2: Risk Max 24h - MAX(deposit * multiplier) from last 24h */}
+        <Link to="/admin/reports?tab=risk" className="group" data-testid="risk-max-24h-card">
           <div className="bg-gray-900/50 border border-gray-800 hover:border-purple-500/30 rounded-xl p-5 transition-all h-full">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-purple-400/80 text-sm font-medium">Max Cashout Exposure</span>
-              <TrendingUp className="w-4 h-4 text-purple-400" />
+              <span className="text-purple-400/80 text-sm font-medium">Risk Max 24h</span>
+              <Clock className="w-4 h-4 text-purple-400" />
             </div>
-            <p className="text-2xl font-bold text-purple-400 mb-1">
-              ${data?.probable_max_cashout?.amount?.toLocaleString() || '0'}
+            <p className="text-2xl font-bold text-purple-400 mb-1" data-testid="risk-max-24h-value">
+              ${toMoney(data?.risk_max_24h?.amount).toLocaleString()}
             </p>
             <p className="text-gray-500 text-xs">
-              @{data?.probable_max_cashout?.max_multiplier_used || 3}x multiplier cap
+              @{data?.risk_max_24h?.max_multiplier_used || 3}x cap • MAX from 24h deposits
             </p>
           </div>
         </Link>
 
         {/* Card 3: Cashout Pressure */}
-        <Link to="/admin/reports?tab=risk" className="group">
+        <Link to="/admin/reports?tab=risk" className="group" data-testid="cashout-pressure-card">
           <div className={`${pressureStyle.bg} border ${pressureStyle.border} rounded-xl p-5 transition-all h-full hover:opacity-90`}>
             <div className="flex items-center justify-between mb-3">
               <span className={`${pressureStyle.text} text-sm font-medium opacity-80`}>Cashout Pressure</span>
               <AlertTriangle className={`w-4 h-4 ${pressureStyle.text}`} />
             </div>
-            <p className={`text-2xl font-bold ${pressureStyle.text} mb-1 uppercase`}>
+            <p className={`text-2xl font-bold ${pressureStyle.text} mb-1 uppercase`} data-testid="cashout-pressure-value">
               {pressure}
             </p>
             <p className="text-gray-500 text-xs">
-              {data?.cashout_pressure?.pending_count || 0} pending • ${data?.cashout_pressure?.pending_amount?.toLocaleString() || '0'}
+              {data?.cashout_pressure?.pending_count || 0} pending • ${toMoney(data?.cashout_pressure?.pending_amount).toLocaleString()}
             </p>
           </div>
         </Link>
