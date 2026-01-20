@@ -53,23 +53,16 @@ const TransactionDetail = () => {
   }, [fetchTransactionDetail]);
 
   const getStatusColor = (status) => {
-    switch (status) {
-      case 'approved':
-      case 'completed':
-        return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
-      case 'pending':
-      case 'pending_approval':
-      case 'pending_review':
-      case 'initiated':
-      case 'awaiting_payment_proof':
-        return 'bg-amber-500/20 text-amber-400 border-amber-500/30';
-      case 'failed':
-      case 'rejected':
-      case 'cancelled':
-        return 'bg-red-500/20 text-red-400 border-red-500/30';
-      default:
-        return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+    if (isCompletedStatus(status)) {
+      return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
     }
+    if (isPendingStatus(status)) {
+      return 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+    }
+    if (isFailedStatus(status)) {
+      return 'bg-red-500/20 text-red-400 border-red-500/30';
+    }
+    return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
   };
 
   const getTimelineIcon = (icon, event) => {
@@ -94,16 +87,17 @@ const TransactionDetail = () => {
 
   const getTimelineColor = (event) => {
     if (!event) return 'bg-gray-600 text-white';
-    if (event.includes('approved') || event.includes('completed') || event.includes('executed')) {
+    const e = normStatus(event);
+    if (e.includes('approved') || e.includes('completed') || e.includes('executed')) {
       return 'bg-emerald-500 text-white';
     }
-    if (event.includes('rejected') || event.includes('cancelled')) {
+    if (e.includes('rejected') || e.includes('cancelled')) {
       return 'bg-red-500 text-white';
     }
-    if (event.includes('created') || event.includes('uploaded')) {
+    if (e.includes('created') || e.includes('uploaded')) {
       return 'bg-violet-500 text-white';
     }
-    if (event.includes('adjusted')) {
+    if (e.includes('adjusted')) {
       return 'bg-amber-500 text-white';
     }
     return 'bg-gray-600 text-white';
@@ -213,11 +207,11 @@ const TransactionDetail = () => {
           <div className="text-center py-4 border-y border-white/10">
             <p className="text-sm text-gray-400 mb-1">Amount</p>
             <p className={`text-3xl font-bold ${isDeposit ? 'text-emerald-400' : 'text-red-400'}`}>
-              {isDeposit ? '+' : '-'}${order?.amount?.toFixed(2) || '0.00'}
+              {isDeposit ? '+' : '-'}${toMoney(order?.amount)}
             </p>
-            {order?.bonus_amount > 0 && (
+            {toNumber(order?.bonus_amount) > 0 && (
               <p className="text-sm text-violet-400 mt-1">
-                +${order.bonus_amount.toFixed(2)} bonus
+                +${toMoney(order.bonus_amount)} bonus
               </p>
             )}
           </div>
@@ -238,11 +232,11 @@ const TransactionDetail = () => {
         </div>
 
         {/* Void Warning */}
-        {order?.void_amount > 0 && (
+        {toNumber(order?.void_amount) > 0 && (
           <div className="flex items-start gap-3 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
             <Info className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
             <div>
-              <p className="text-amber-400 font-medium">Amount Voided: ${order.void_amount.toFixed(2)}</p>
+              <p className="text-amber-400 font-medium">Amount Voided: ${toMoney(order.void_amount)}</p>
               {order.void_reason && (
                 <p className="text-amber-400/80 text-sm mt-1">{String(order.void_reason)}</p>
               )}
@@ -262,12 +256,12 @@ const TransactionDetail = () => {
         )}
 
         {/* Payout Info */}
-        {order?.payout_amount > 0 && (
+        {toNumber(order?.payout_amount) > 0 && (
           <div className="flex items-start gap-3 p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
             <DollarSign className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
             <div>
               <p className="text-emerald-400 font-medium">Payout Amount</p>
-              <p className="text-emerald-400 text-2xl font-bold mt-1">${order.payout_amount.toFixed(2)}</p>
+              <p className="text-emerald-400 text-2xl font-bold mt-1">${toMoney(order.payout_amount)}</p>
             </div>
           </div>
         )}
