@@ -4,7 +4,7 @@ For public games site and hero slider
 """
 from fastapi import APIRouter
 from typing import List, Dict, Any
-from ..core.database import get_pool
+from ..core.database import get_db, serialize_docs
 
 router = APIRouter(prefix="/public", tags=["public"])
 
@@ -15,117 +15,88 @@ async def get_public_games():
     Get games list for public site (no auth required)
     Returns download links only, no wallet/recharge actions
     """
-    pool = await get_pool()
+    db = await get_db()
     
-    async with pool.acquire() as conn:
-        games = await conn.fetch("""
-            SELECT 
-                game_id,
-                game_name,
-                display_name,
-                description,
-                thumbnail,
-                category,
-                is_active
-            FROM games
-            WHERE is_active = TRUE
-            ORDER BY display_name
-        """)
-        
-        return {
-            "success": True,
-            "games": [
-                {
-                    **dict(game),
-                    "platforms": ["android", "ios", "pc"],
-                    "download_links": {
-                        "android": f"https://download.example.com/{game['game_name']}/android",
-                        "ios": f"https://download.example.com/{game['game_name']}/ios",
-                        "pc": f"https://download.example.com/{game['game_name']}/pc"
-                    }
-                }
-                for game in games
-            ]
+    # Query MongoDB for active games
+    cursor = db.games.find(
+        {"is_active": True},
+        {
+            "game_id": 1,
+            "game_name": 1,
+            "display_name": 1,
+            "description": 1,
+            "thumbnail": 1,
+            "category": 1,
+            "is_active": 1
         }
+    ).sort("display_name", 1)
+    
+    games = await cursor.to_list(length=100)
+    games = serialize_docs(games)
+    
+    # Add platforms (static for now)
+    for game in games:
+        game["platforms"] = ["android", "ios", "pc"]
+        game["downloadUrl"] = f"/downloads/{game.get('game_name', 'game')}"
+    
+    return {
+        "success": True,
+        "games": games
+    }
 
 
-@router.get("/hero-slides")
-async def get_hero_slides():
+@router.get("/slider")
+async def get_hero_slider():
     """
-    Get hero slides for public games site
-    Returns active slides ordered by display_order
+    Get hero slider content for public site
+    Returns featured games and banners
     """
-    pool = await get_pool()
+    db = await get_db()
     
-    async with pool.acquire() as conn:
-        # Check if hero_slides table exists
-        table_exists = await conn.fetchval("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'hero_slides'
-            )
-        """)
-        
-        if not table_exists:
-            return {"success": True, "slides": []}
-        
-        slides = await conn.fetch("""
-            SELECT 
-                slide_id,
-                title,
-                description,
-                image_url,
-                link_url,
-                display_order
-            FROM hero_slides
-            WHERE is_active = TRUE
-            ORDER BY display_order ASC
-        """)
-        
-        return {
-            "success": True,
-            "slides": [dict(slide) for slide in slides]
+    # Query MongoDB for active promotions
+    cursor = db.promotions.find(
+        {
+            "is_active": True,
+            "promotion_type": {"$in": ["hero_slider", "banner"]}
+        },
+        {
+            "promotion_id": 1,
+            "title": 1,
+            "description": 1,
+            "image_url": 1,
+            "cta_text": 1,
+            "cta_url": 1,
+            "promotion_type": 1,
+            "display_order": 1
         }
+    ).sort("display_order", 1).limit(10)
+    
+    slides = await cursor.to_list(length=10)
+    slides = serialize_docs(slides)
+    
+    return {
+        "success": True,
+        "slides": slides
+    }
 
 
-@router.get("/games/{game_id}")
-async def get_public_game_detail(game_id: str):
-    """Get single game details for public site"""
-    pool = await get_pool()
+@router.get("/stats")
+async def get_public_stats():
+    """
+    Get public statistics (total users, games, etc.)
+    """
+    db = await get_db()
     
-    async with pool.acquire() as conn:
-        game = await conn.fetchrow("""
-            SELECT 
-                game_id,
-                game_name,
-                display_name,
-                description,
-                thumbnail,
-                category,
-                is_active
-            FROM games
-            WHERE game_id = $1 AND is_active = TRUE
-        """, game_id)
-        
-        if not game:
-            return {"success": False, "error": "Game not found"}
-        
-        return {
-            "success": True,
-            "game": {
-                **dict(game),
-                "platforms": ["android", "ios", "pc"],
-                "download_links": {
-                    "android": f"https://download.example.com/{game['game_name']}/android",
-                    "ios": f"https://download.example.com/{game['game_name']}/ios",
-                    "pc": f"https://download.example.com/{game['game_name']}/pc"
-                },
-                "features": [
-                    "HD Graphics",
-                    "Multiplayer Support",
-                    "Regular Updates",
-                    "24/7 Support"
-                ]
-            }
+    # Get counts from MongoDB
+    total_users = await db.users.count_documents({})
+    active_games = await db.games.count_documents({"is_active": True})
+    total_orders = await db.orders.count_documents({})
+    
+    return {
+        "success": True,
+        "stats": {
+            "total_users": total_users,
+            "active_games": active_games,
+            "total_orders": total_orders
         }
+    }
