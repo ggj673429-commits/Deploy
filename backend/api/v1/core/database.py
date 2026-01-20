@@ -217,9 +217,73 @@ async def execute_returning(query: str, *args) -> Optional[Dict[str, Any]]:
 async def get_pool():
     """
     PostgreSQL-style get_pool compatibility function
-    Returns MongoDB database instead for compatibility
+    Returns a connection pool wrapper that supports acquire() context manager
     """
-    return await get_db()
+    db = await get_db()
+    return MongoDBPoolWrapper(db)
+
+
+class MongoDBPoolWrapper:
+    """
+    Wrapper to make MongoDB database behave like PostgreSQL connection pool
+    Supports async with pool.acquire() syntax for compatibility
+    """
+    def __init__(self, db):
+        self.db = db
+    
+    def acquire(self):
+        """Return a connection-like wrapper"""
+        return MongoDBConnectionWrapper(self.db)
+
+
+class MongoDBConnectionWrapper:
+    """
+    Wrapper to make MongoDB database behave like PostgreSQL connection
+    Provides compatibility methods like fetch(), fetchrow(), execute()
+    """
+    def __init__(self, db):
+        self.db = db
+    
+    async def __aenter__(self):
+        """Enter async context manager"""
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit async context manager"""
+        pass
+    
+    def transaction(self):
+        """Fake transaction support - MongoDB doesn't need explicit transactions for single ops"""
+        return FakeTransaction()
+    
+    async def fetch(self, query: str, *args):
+        """Compatibility method - returns empty list"""
+        logger.warning(f"fetch() called with SQL query (not supported in MongoDB): {query[:100]}")
+        return []
+    
+    async def fetchrow(self, query: str, *args):
+        """Compatibility method - returns None"""
+        logger.warning(f"fetchrow() called with SQL query (not supported in MongoDB): {query[:100]}")
+        return None
+    
+    async def fetchval(self, query: str, *args):
+        """Compatibility method - returns None"""
+        logger.warning(f"fetchval() called with SQL query (not supported in MongoDB): {query[:100]}")
+        return None
+    
+    async def execute(self, query: str, *args):
+        """Compatibility method - returns success"""
+        logger.warning(f"execute() called with SQL query (not supported in MongoDB): {query[:100]}")
+        return "SUCCESS"
+
+
+class FakeTransaction:
+    """Fake transaction context manager for compatibility"""
+    async def __aenter__(self):
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 
 # ==================== Helper Functions ====================
