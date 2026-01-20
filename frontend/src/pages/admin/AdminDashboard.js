@@ -343,9 +343,9 @@ const AdminDashboard = () => {
       </Link>
 
       {/* ============ SECTION 6: GROWTH & RISK ============ */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         {/* Growth Snapshot */}
-        <Link to="/admin/clients" className="group">
+        <Link to="/admin/clients" className="group" data-testid="active-clients-card">
           <Card className="bg-gray-900/50 border-gray-800 hover:border-emerald-500/30 transition-all h-full">
             <CardContent className="pt-5">
               <div className="flex items-center gap-3 mb-4">
@@ -358,7 +358,10 @@ const AdminDashboard = () => {
                 </div>
               </div>
               <div className="flex items-end justify-between">
-                <p className="text-4xl font-bold text-white">{data?.active_clients || 0}</p>
+                <div>
+                  <p className="text-4xl font-bold text-white" data-testid="active-clients-value">{data?.active_clients || 0}</p>
+                  <p className="text-emerald-400/70 text-xs mt-1">{data?.active_clients_7d || 0} active in 7d</p>
+                </div>
                 <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-emerald-400 group-hover:translate-x-1 transition-all" />
               </div>
             </CardContent>
@@ -366,7 +369,7 @@ const AdminDashboard = () => {
         </Link>
 
         {/* Risk Snapshot */}
-        <Link to="/admin/reports?tab=voids" className="group">
+        <Link to="/admin/reports?tab=voids" className="group" data-testid="voided-today-card">
           <Card className="bg-gray-900/50 border-gray-800 hover:border-orange-500/30 transition-all h-full">
             <CardContent className="pt-5">
               <div className="flex items-center gap-3 mb-4">
@@ -379,8 +382,29 @@ const AdminDashboard = () => {
                 </div>
               </div>
               <div className="flex items-end justify-between">
-                <p className="text-4xl font-bold text-orange-400">${data?.today?.voided?.toFixed(2) || '0.00'}</p>
+                <p className="text-4xl font-bold text-orange-400" data-testid="voided-today-value">${toMoney(data?.today?.voided)}</p>
                 <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-orange-400 group-hover:translate-x-1 transition-all" />
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        {/* Referral Earnings Paid Today */}
+        <Link to="/admin/referrals" className="group" data-testid="referral-earnings-card">
+          <Card className="bg-gray-900/50 border-gray-800 hover:border-purple-500/30 transition-all h-full">
+            <CardContent className="pt-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-purple-500/10 rounded-xl flex items-center justify-center">
+                  <DollarSign className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <p className="text-gray-400 text-sm">Referral Program</p>
+                  <p className="text-white font-semibold">Earnings Paid Today</p>
+                </div>
+              </div>
+              <div className="flex items-end justify-between">
+                <p className="text-4xl font-bold text-purple-400" data-testid="referral-earnings-value">${toMoney(data?.today?.referral_earnings_paid)}</p>
+                <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-purple-400 group-hover:translate-x-1 transition-all" />
               </div>
             </CardContent>
           </Card>
