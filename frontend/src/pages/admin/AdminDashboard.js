@@ -228,48 +228,64 @@ const AdminDashboard = () => {
           <Zap className="w-5 h-5 text-emerald-400" />
           Today&apos;s Money Flow
         </h2>
-        <div className="grid grid-cols-3 gap-4">
-          {/* Deposits In */}
-          <Link to="/admin/orders?type=deposit" className="group">
+        <div className="grid grid-cols-4 gap-4">
+          {/* Deposits In - Fixed link to order_type=game_load */}
+          <Link to="/admin/orders?order_type=game_load" className="group" data-testid="deposits-in-card">
             <Card className="bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border-emerald-500/20 hover:border-emerald-500/40 transition-all h-full">
               <CardContent className="pt-5 pb-5">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-emerald-400/80 text-sm font-medium">Deposits In</span>
                   <ArrowUpRight className="w-4 h-4 text-emerald-400" />
                 </div>
-                <p className="text-3xl font-bold text-emerald-400">
-                  ${data?.today?.deposits_in?.toFixed(2) || '0.00'}
+                <p className="text-3xl font-bold text-emerald-400" data-testid="deposits-in-value">
+                  ${toMoney(data?.today?.deposits_in)}
                 </p>
               </CardContent>
             </Card>
           </Link>
 
-          {/* Withdrawals Out */}
-          <Link to="/admin/orders?type=withdrawal" className="group">
+          {/* Withdrawals Out - Fixed link to order_type=withdrawal_game */}
+          <Link to="/admin/orders?order_type=withdrawal_game" className="group" data-testid="withdrawals-out-card">
             <Card className="bg-gradient-to-br from-red-500/10 to-red-500/5 border-red-500/20 hover:border-red-500/40 transition-all h-full">
               <CardContent className="pt-5 pb-5">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-red-400/80 text-sm font-medium">Withdrawals Out</span>
                   <ArrowDownRight className="w-4 h-4 text-red-400" />
                 </div>
-                <p className="text-3xl font-bold text-red-400">
-                  ${data?.today?.withdrawals_out?.toFixed(2) || '0.00'}
+                <p className="text-3xl font-bold text-red-400" data-testid="withdrawals-out-value">
+                  ${toMoney(data?.today?.withdrawals_out)}
                 </p>
               </CardContent>
             </Card>
           </Link>
 
           {/* Net Profit */}
-          <Link to="/admin/reports" className="group">
+          <Link to="/admin/reports" className="group" data-testid="net-profit-card">
             <Card className="bg-gradient-to-br from-blue-500/10 to-purple-500/5 border-blue-500/20 hover:border-blue-500/40 transition-all h-full">
               <CardContent className="pt-5 pb-5">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-blue-400/80 text-sm font-medium">Net Profit</span>
                   <TrendingUp className="w-4 h-4 text-blue-400" />
                 </div>
-                <p className={`text-3xl font-bold ${(data?.net_profit || 0) >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
-                  ${data?.net_profit?.toFixed(2) || '0.00'}
+                <p className={`text-3xl font-bold ${Number(data?.today?.net_profit || 0) >= 0 ? 'text-blue-400' : 'text-red-400'}`} data-testid="net-profit-value">
+                  ${toMoney(data?.today?.net_profit)}
                 </p>
+              </CardContent>
+            </Card>
+          </Link>
+
+          {/* NEW: Cash Balance Card */}
+          <Link to="/admin/clients" className="group" data-testid="cash-balance-card">
+            <Card className="bg-gradient-to-br from-yellow-500/10 to-amber-500/5 border-yellow-500/20 hover:border-yellow-500/40 transition-all h-full">
+              <CardContent className="pt-5 pb-5">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-yellow-400/80 text-sm font-medium">Cash Balance</span>
+                  <Wallet className="w-4 h-4 text-yellow-400" />
+                </div>
+                <p className="text-3xl font-bold text-yellow-400" data-testid="cash-balance-value">
+                  ${toMoney(data?.cash_balance_total)}
+                </p>
+                <p className="text-yellow-400/60 text-xs mt-1">All clients&apos; withdrawable</p>
               </CardContent>
             </Card>
           </Link>
