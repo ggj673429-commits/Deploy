@@ -232,12 +232,16 @@ async def consume_magic_link_endpoint(request: Request, token: str):
     summary="Validate access token"
 )
 async def validate_token_get(auth: AuthResult = Depends(authenticate_request)):
-    """Validate current access token"""
+    """Validate current access token - returns user in nested object for frontend compatibility"""
     return TokenValidationResponse(
         valid=True,
-        user_id=auth.user_id,
-        username=auth.username,
-        role=auth.role
+        user={
+            "user_id": auth.user_id,
+            "username": auth.username,
+            "display_name": auth.display_name or auth.username,
+            "role": auth.role,
+            "referral_code": getattr(auth, 'referral_code', None)
+        }
     )
 
 
