@@ -484,9 +484,9 @@ const ClientReferrals = () => {
               
               {/* Table Body */}
               <div className="divide-y divide-white/5">
-                {earnings.map((earning, idx) => (
+                {earnings.map((earning) => (
                   <div 
-                    key={idx} 
+                    key={earning.earning_id || earning.transaction_id || earning.id || `${earning.friend}-${earning.deposit_amount}`} 
                     className="grid grid-cols-4 gap-2 px-4 py-3 items-center"
                   >
                     <div className="text-sm font-medium text-white truncate">{String(earning.friend || 'N/A')}</div>
