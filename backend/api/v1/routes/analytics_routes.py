@@ -167,112 +167,155 @@ async def get_risk_snapshot(request: Request, authorization: str = Header(...)):
     }
 
 
-# ==================== LAYER 2: PLATFORM TREND ANALYTICS ====================
+# ==================== LAYER 2: PLATFORM TRENDS (MongoDB) ====================
 
-@router.get("/platform-trends", summary="Platform Performance Trend Chart Data")
-async def get_platform_trends(
-    request: Request,
-    days: int = 30,
-    game: Optional[str] = None,
-    client_segment: Optional[str] = None,  # all, referred, non_referred, high_risk
-    wallet_type: Optional[str] = None,  # cash, bonus, combined
-    authorization: str = Header(...)
-):
+@router.get("/platform-trends", summary="30-day trend data for charts")
+async def get_platform_trends(request: Request, days: int = 30, authorization: str = Header(...)):
     """
-    Platform Performance Trend - Time series data for dashboard chart
-    Returns daily aggregated data for the selected period
+    Platform Trends - Last N days (default 30) - MongoDB
+    
+    Returns daily buckets based on approved_at (client timezone day boundaries):
+    - deposits = sum(game_load.amount)
+    - withdrawals_paid = sum(withdrawal_game.payout_amount)
+    - bonus_issued = sum(max(total_credited - amount, 0)) on game_load
+    - bonus_voided = sum(void_amount) from redemptions
+    - net_profit = deposits - withdrawals_paid - referral_earnings_paid
+    - referral_earnings_paid = sum of paid referral earnings
+    - active_clients = count distinct users with approved deposit
     """
     auth = await require_admin_access(request, authorization)
     
-    # Calculate date range
-    end_date = datetime.now(timezone.utc).replace(hour=23, minute=59, second=59)
-    start_date = end_date - timedelta(days=days)
+    db = await get_db()
     
-    # Build dynamic query based on filters
-    base_conditions = "WHERE o.created_at >= $1 AND o.created_at <= $2"
-    params = [start_date, end_date]
-    param_idx = 3
+    # Get day ranges in client timezone
+    day_ranges = get_last_n_days_ranges(request, days)
+    approved_statuses = ['approved', 'APPROVED_EXECUTED', 'completed', 'paid']
     
-    # Game filter
-    if game and game != 'all':
-        base_conditions += f" AND o.game_name = ${param_idx}"
-        params.append(game)
-        param_idx += 1
+    daily_data = []
     
-    # Client segment filter - requires JOIN
-    segment_join = ""
-    if client_segment and client_segment != 'all':
-        segment_join = " JOIN users u ON o.user_id = u.user_id"
-        if client_segment == 'referred':
-            base_conditions += " AND u.referred_by_code IS NOT NULL"
-        elif client_segment == 'non_referred':
-            base_conditions += " AND u.referred_by_code IS NULL"
-        elif client_segment == 'high_risk':
-            base_conditions += " AND u.is_suspicious = TRUE"
-    
-    # Get daily trend data
-    trend_query = f"""
-        SELECT 
-            DATE(o.created_at) as date,
-            COALESCE(SUM(o.amount) FILTER (WHERE o.order_type = 'deposit' AND o.status = 'APPROVED_EXECUTED'), 0) as deposits,
-            COALESCE(SUM(o.payout_amount) FILTER (WHERE o.order_type = 'withdrawal' AND o.status = 'APPROVED_EXECUTED'), 0) as withdrawals_paid,
-            COALESCE(SUM(o.bonus_amount) FILTER (WHERE o.status = 'APPROVED_EXECUTED'), 0) as bonus_issued,
-            COALESCE(SUM(o.void_amount) FILTER (WHERE o.status = 'APPROVED_EXECUTED'), 0) as bonus_voided,
-            COALESCE(SUM(o.play_credits_added) FILTER (WHERE o.status = 'APPROVED_EXECUTED'), 0) as play_credits_added,
-            COUNT(DISTINCT o.user_id) FILTER (WHERE o.status = 'APPROVED_EXECUTED') as active_clients
-        FROM orders o
-        {segment_join}
-        {base_conditions}
-        GROUP BY DATE(o.created_at)
-        ORDER BY date ASC
-    """
-    
-    daily_data = await fetch_all(trend_query, *params)
-    
-    # Format for chart
-    trend_data = []
-    for row in daily_data:
-        deposits = float(row['deposits'] or 0)
-        withdrawals = float(row['withdrawals_paid'] or 0)
-        net_profit = deposits - withdrawals
-        
-        trend_data.append({
-            "date": row['date'].isoformat() if row.get('date') else None,
-            "deposits": round(deposits, 2),
-            "withdrawals_paid": round(withdrawals, 2),
-            "net_profit": round(net_profit, 2),
-            "bonus_issued": round(float(row['bonus_issued'] or 0), 2),
-            "bonus_voided": round(float(row['bonus_voided'] or 0), 2),
-            "play_credits_added": round(float(row['play_credits_added'] or 0), 2),
-            "active_clients": row['active_clients'] or 0
-        })
-    
-    # Calculate totals for the period
+    # Totals for the period
     totals = {
-        "deposits": sum(d['deposits'] for d in trend_data),
-        "withdrawals_paid": sum(d['withdrawals_paid'] for d in trend_data),
-        "net_profit": sum(d['net_profit'] for d in trend_data),
-        "bonus_issued": sum(d['bonus_issued'] for d in trend_data),
-        "bonus_voided": sum(d['bonus_voided'] for d in trend_data)
+        "deposits": 0,
+        "withdrawals_paid": 0,
+        "bonus_issued": 0,
+        "bonus_voided": 0,
+        "net_profit": 0,
+        "referral_earnings_paid": 0
     }
     
-    # Get available games for filter dropdown
-    games = await fetch_all("SELECT DISTINCT game_name FROM orders ORDER BY game_name")
+    for day_start, day_end, date_label in day_ranges:
+        # Deposits (game_load amount)
+        deposits_pipeline = [
+            {"$match": {
+                "order_type": {"$in": ["game_load", "deposit", "wallet_load"]},
+                "status": {"$in": approved_statuses},
+                "approved_at": {"$gte": day_start, "$lte": day_end}
+            }},
+            {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+        ]
+        deposits_result = await db.orders.aggregate(deposits_pipeline).to_list(1)
+        deposits = float(deposits_result[0]["total"]) if deposits_result else 0
+        
+        # Withdrawals paid (payout_amount)
+        withdrawals_pipeline = [
+            {"$match": {
+                "order_type": {"$in": ["withdrawal_game", "withdrawal", "wallet_redeem"]},
+                "status": {"$in": approved_statuses},
+                "approved_at": {"$gte": day_start, "$lte": day_end}
+            }},
+            {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$payout_amount", "$amount"]}}}}
+        ]
+        withdrawals_result = await db.orders.aggregate(withdrawals_pipeline).to_list(1)
+        withdrawals_paid = float(withdrawals_result[0]["total"]) if withdrawals_result else 0
+        
+        # Bonus issued = sum(total_credited - amount) where > 0
+        bonus_issued_pipeline = [
+            {"$match": {
+                "order_type": {"$in": ["game_load", "deposit"]},
+                "status": {"$in": approved_statuses},
+                "approved_at": {"$gte": day_start, "$lte": day_end}
+            }},
+            {"$project": {
+                "bonus": {"$max": [0, {"$subtract": [
+                    {"$ifNull": ["$total_amount", "$amount"]}, 
+                    {"$ifNull": ["$amount", 0]}
+                ]}]}
+            }},
+            {"$group": {"_id": None, "total": {"$sum": "$bonus"}}}
+        ]
+        bonus_issued_result = await db.orders.aggregate(bonus_issued_pipeline).to_list(1)
+        bonus_issued = float(bonus_issued_result[0]["total"]) if bonus_issued_result else 0
+        
+        # Bonus voided (void_amount from redemptions)
+        bonus_voided_pipeline = [
+            {"$match": {
+                "status": {"$in": approved_statuses},
+                "approved_at": {"$gte": day_start, "$lte": day_end},
+                "void_amount": {"$gt": 0}
+            }},
+            {"$group": {"_id": None, "total": {"$sum": "$void_amount"}}}
+        ]
+        bonus_voided_result = await db.orders.aggregate(bonus_voided_pipeline).to_list(1)
+        bonus_voided = float(bonus_voided_result[0]["total"]) if bonus_voided_result else 0
+        
+        # Referral earnings paid
+        referral_pipeline = [
+            {"$match": {
+                "status": {"$in": ["paid", "credited", "completed"]},
+                "created_at": {"$gte": day_start, "$lte": day_end}
+            }},
+            {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+        ]
+        referral_result = await db.referral_earnings.aggregate(referral_pipeline).to_list(1)
+        referral_earnings = float(referral_result[0]["total"]) if referral_result else 0
+        
+        # Net profit = deposits - withdrawals - referral_earnings
+        net_profit = deposits - withdrawals_paid - referral_earnings
+        
+        # Active clients (distinct users with approved deposit this day)
+        active_clients_pipeline = [
+            {"$match": {
+                "order_type": {"$in": ["game_load", "deposit"]},
+                "status": {"$in": approved_statuses},
+                "approved_at": {"$gte": day_start, "$lte": day_end}
+            }},
+            {"$group": {"_id": "$user_id"}},
+            {"$count": "count"}
+        ]
+        active_result = await db.orders.aggregate(active_clients_pipeline).to_list(1)
+        active_clients = active_result[0]["count"] if active_result else 0
+        
+        # Add to daily data
+        daily_data.append({
+            "date": date_label,
+            "deposits": round(deposits, 2),
+            "withdrawals_paid": round(withdrawals_paid, 2),
+            "bonus_issued": round(bonus_issued, 2),
+            "bonus_voided": round(bonus_voided, 2),
+            "net_profit": round(net_profit, 2),
+            "referral_earnings_paid": round(referral_earnings, 2),
+            "active_clients": active_clients
+        })
+        
+        # Update totals
+        totals["deposits"] += deposits
+        totals["withdrawals_paid"] += withdrawals_paid
+        totals["bonus_issued"] += bonus_issued
+        totals["bonus_voided"] += bonus_voided
+        totals["net_profit"] += net_profit
+        totals["referral_earnings_paid"] += referral_earnings
     
     return {
-        "period": {
-            "start": start_date.isoformat(),
-            "end": end_date.isoformat(),
-            "days": days
-        },
-        "filters": {
-            "game": game or "all",
-            "client_segment": client_segment or "all",
-            "wallet_type": wallet_type or "combined"
-        },
-        "available_games": [g['game_name'] for g in games if g['game_name']],
-        "trend_data": trend_data,
-        "totals": {k: round(v, 2) for k, v in totals.items()}
+        "days": days,
+        "data": daily_data,
+        "totals": {
+            "deposits": round(totals["deposits"], 2),
+            "withdrawals_paid": round(totals["withdrawals_paid"], 2),
+            "bonus_issued": round(totals["bonus_issued"], 2),
+            "bonus_voided": round(totals["bonus_voided"], 2),
+            "net_profit": round(totals["net_profit"], 2),
+            "referral_earnings_paid": round(totals["referral_earnings_paid"], 2)
+        }
     }
 
 
