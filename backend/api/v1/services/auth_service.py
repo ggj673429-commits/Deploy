@@ -28,17 +28,17 @@ async def create_user(
     Create a new user account.
     Returns (success, data/error)
     """
+    from ..core.database import get_db, serialize_doc, create_user_doc, generate_uuid
+    
     username = username.lower().strip()
     
     # Use username as display_name if not provided
     if not display_name:
         display_name = username.title()
     
-    # Check if username exists
-    existing = await fetch_one(
-        "SELECT user_id FROM users WHERE username = $1",
-        username
-    )
+    # Check if username exists in MongoDB
+    db = await get_db()
+    existing = await db.users.find_one({"username": username})
     if existing:
         return False, {
             "message": "Username already exists",
@@ -48,10 +48,11 @@ async def create_user(
     # Validate referral code if provided
     referrer_user_id = None
     if referred_by_code:
-        referrer = await fetch_one(
-            "SELECT user_id, username FROM users WHERE referral_code = $1 AND is_active = TRUE",
-            referred_by_code.upper()
+        referrer = await db.users.find_one(
+            {"referral_code": referred_by_code.upper(), "is_active": True},
+            {"user_id": 1, "username": 1}
         )
+        referrer = serialize_doc(referrer)
         if not referrer:
             return False, {
                 "message": "Invalid referral code",
@@ -61,20 +62,26 @@ async def create_user(
     
     # Generate unique referral code
     referral_code = generate_referral_code()
-    while await fetch_one("SELECT user_id FROM users WHERE referral_code = $1", referral_code):
+    while await db.users.find_one({"referral_code": referral_code}):
         referral_code = generate_referral_code()
     
-    # Create user
-    user_id = str(uuid.uuid4())
+    # Create user in MongoDB
+    user_id = generate_uuid()
     password_hash = hash_password(password)
     
-    await execute('''
-        INSERT INTO users (user_id, username, password_hash, display_name, referral_code, referred_by_code, referred_by_user_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-    ''', user_id, username, password_hash, display_name, referral_code,
-       referred_by_code.upper() if referred_by_code else None, referrer_user_id)
+    user_doc = create_user_doc(
+        user_id=user_id,
+        username=username,
+        password_hash=password_hash,
+        display_name=display_name,
+        referral_code=referral_code,
+        referred_by_code=referred_by_code.upper() if referred_by_code else None,
+        referred_by_user_id=referrer_user_id
+    )
     
-    # Log audit
+    await db.users.insert_one(user_doc)
+    
+    # Log audit (compatibility layer will handle this)
     await log_audit(user_id, username, "user.signup", "user", user_id, {
         "referred_by": referred_by_code
     })
@@ -97,7 +104,11 @@ async def create_user(
         
         # If user was referred, also emit REFERRAL_JOINED
         if referrer_user_id:
-            referrer = await fetch_one("SELECT username, display_name FROM users WHERE user_id = $1", referrer_user_id)
+            referrer = await db.users.find_one(
+                {"user_id": referrer_user_id},
+                {"username": 1, "display_name": 1}
+            )
+            referrer = serialize_doc(referrer)
             if referrer:
                 await emit_event(
                     event_type=EventType.REFERRAL_JOINED,
