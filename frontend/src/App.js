@@ -192,6 +192,7 @@ function App() {
             <Route path="*" element={<Navigate to="/games" replace />} />
           </Routes>
         </div>
+        <Toaster position="top-center" richColors closeButton />
       </Router>
     </AuthProvider>
   );
