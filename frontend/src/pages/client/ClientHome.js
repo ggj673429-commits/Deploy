@@ -86,7 +86,7 @@ const ClientHome = () => {
     return <PageLoader message="Loading your dashboard..." />;
   }
 
-  const totalBalance = walletData?.wallet_balance || walletData?.real_balance || 0;
+  const totalBalance = toNumber(walletData?.wallet_balance || walletData?.real_balance);
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] pb-24" data-testid="client-home">
@@ -152,7 +152,7 @@ const ClientHome = () => {
           <div className="relative">
             <p className="text-sm text-gray-400 mb-1">Total Balance</p>
             <h2 className="text-4xl font-bold text-white mb-4">
-              ${totalBalance.toFixed(2)}
+              ${toMoney(totalBalance)}
             </h2>
             
             {/* Balance Breakdown */}
@@ -160,19 +160,19 @@ const ClientHome = () => {
               <div className="bg-white/5 backdrop-blur rounded-xl p-3">
                 <p className="text-xs text-gray-500 mb-1">Cash</p>
                 <p className="text-sm font-semibold text-emerald-400">
-                  ${(walletData?.cash_balance || 0).toFixed(2)}
+                  ${toMoney(walletData?.cash_balance)}
                 </p>
               </div>
               <div className="bg-white/5 backdrop-blur rounded-xl p-3">
                 <p className="text-xs text-gray-500 mb-1">Play Credits</p>
                 <p className="text-sm font-semibold text-violet-400">
-                  ${(walletData?.play_credits || 0).toFixed(2)}
+                  ${toMoney(walletData?.play_credits)}
                 </p>
               </div>
               <div className="bg-white/5 backdrop-blur rounded-xl p-3">
                 <p className="text-xs text-gray-500 mb-1">Bonus</p>
                 <p className="text-sm font-semibold text-amber-400">
-                  ${(walletData?.bonus_balance || 0).toFixed(2)}
+                  ${toMoney(walletData?.bonus_balance)}
                 </p>
               </div>
             </div>
