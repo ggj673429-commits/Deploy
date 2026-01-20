@@ -139,11 +139,51 @@ No blockers found.
 
 ---
 
+## What's Been Implemented (Jan 20, 2026 - Session 2)
+
+### P0: Payment QR System Migration (MongoDB Native) ✅
+**Problem**: Payment QR management system was broken because backend routes still used non-functional SQL compatibility layer (`fetch_one`, `fetch_all`, `execute`) instead of native MongoDB queries.
+
+**Solution**:
+1. **Backend - admin_system_routes.py**: Rewrote ALL Payment Methods CRUD endpoints to use native MongoDB:
+   - `GET /api/v1/admin/system/payment-methods`: Uses `db.payment_methods.find()`
+   - `POST /api/v1/admin/system/payment-methods`: Uses `db.payment_methods.insert_one()`
+   - `PUT /api/v1/admin/system/payment-methods/{id}`: Uses `db.payment_methods.update_one()`
+   - `DELETE /api/v1/admin/system/payment-methods/{id}`: Uses `db.payment_methods.delete_one()`
+
+2. **Backend - admin_system_routes.py**: Rewrote ALL Payment QR CRUD endpoints to use native MongoDB:
+   - `GET /api/v1/admin/system/payment-qr`: Uses `db.payment_qr.find()` with sorting
+   - `POST /api/v1/admin/system/payment-qr`: Uses `db.payment_qr.insert_one()` with unique active/default logic
+   - `PATCH /api/v1/admin/system/payment-qr/{id}`: Uses `db.payment_qr.update_one()` with unique active/default logic
+   - `DELETE /api/v1/admin/system/payment-qr/{id}`: Uses `db.payment_qr.delete_one()` with 404 handling
+
+3. **Backend - payment_routes.py**: Rewrote client-facing `/payments/methods` endpoint:
+   - Uses `db.payment_methods.find({"enabled": True})` for methods
+   - Uses `db.payment_qr.find()` with `$or` query for backward compatibility (matches on both `title` and `method_id`)
+   - Uses `serialize_docs()` for JSON serialization
+
+4. **MongoDB Indexes** (already existed in database.py):
+   - `payment_methods`: method_id (unique), enabled, priority
+   - `payment_qr`: qr_id (unique), payment_method, compound indexes for is_active and is_default
+
+**Key Features Verified**:
+- ✅ Unique active QR per payment method (creating new active QR deactivates previous)
+- ✅ Unique default QR per payment method
+- ✅ Backward compatibility (QR matches on both `title` and `method_id`)
+- ✅ Proper 404 handling on DELETE and PATCH
+- ✅ Client endpoint shows only enabled methods with their active QRs
+
+**Test Data Created**:
+- Payment Method: GCash (method_id: 01ce2a7b-032d-4622-9bb5-21c6de4a556e)
+- Payment QR: "Updated QR Label" (qr_id: f5cc9f9e-aebb-47c9-85d5-7609f5c67db7, is_active: true)
+
+---
+
 ## Backlog / Future Tasks
 
 ### P1: Complete PostgreSQL to MongoDB Migration
 - Many other backend routes still use SQL compatibility functions
-- Audit all files using `fetch_one`, `fetch_all`, `execute`, `pool.acquire`
+- Files that need audit: admin_system_routes.py (webhooks, API keys, wallet loads), payment_routes.py (proof upload, order action)
 - Convert to native MongoDB queries
 
 ### P2: Referral Earnings Tracking
