@@ -455,5 +455,8 @@ __all__ = [
     "fetch_one",
     "fetch_all",
     "execute",
-    "execute_returning"
+    "execute_returning",
+    "MongoDBPoolWrapper",
+    "MongoDBConnectionWrapper",
+    "FakeTransaction"
 ]
