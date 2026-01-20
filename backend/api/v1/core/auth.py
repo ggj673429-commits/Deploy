@@ -166,21 +166,29 @@ async def resolve_user_from_jwt(token: str) -> Optional[AuthenticatedUser]:
 async def resolve_user_from_portal_token(token: str) -> Optional[AuthenticatedUser]:
     """
     Resolve user from portal session token (legacy support).
+    Uses native MongoDB queries.
     """
-    session = await fetch_one(
-        """SELECT user_id FROM portal_sessions 
-           WHERE session_token = $1 AND expires_at > NOW()""",
-        token
-    )
+    from ..core.database import get_db, serialize_doc
+    from datetime import datetime, timezone
+    
+    db = await get_db()
+    
+    # Check portal sessions collection
+    session = await db.portal_sessions.find_one({
+        "session_token": token,
+        "expires_at": {"$gt": datetime.now(timezone.utc)}
+    })
+    session = serialize_doc(session)
     
     if not session:
         return None
     
-    user = await fetch_one(
-        """SELECT user_id, username, display_name, referral_code, role, is_active 
-           FROM users WHERE user_id = $1""",
-        session['user_id']
+    # Get user from MongoDB
+    user = await db.users.find_one(
+        {"user_id": session['user_id']},
+        {"user_id": 1, "username": 1, "display_name": 1, "referral_code": 1, "role": 1, "is_active": 1}
     )
+    user = serialize_doc(user)
     
     if not user:
         return None
