@@ -114,59 +114,100 @@ class ApprovalAction(BaseModel):
 
 @router.get("/dashboard", summary="Dashboard overview - read-only")
 async def get_dashboard(request: Request, authorization: str = Header(...)):
-    """Quick health check overview ONLY"""
+    """Quick health check overview ONLY - Uses MongoDB"""
+    from ..core.database import get_db
+    
     auth = await require_admin_access(request, authorization)
+    
+    db = await get_db()
     
     # Get today's date range
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # Pending approvals
-    pending = await fetch_one("""
-        SELECT 
-            COUNT(*) FILTER (WHERE status IN ('pending_review', 'awaiting_payment_proof')) as pending_total,
-            COUNT(*) FILTER (WHERE status IN ('pending_review', 'awaiting_payment_proof') AND order_type = 'deposit') as pending_deposits,
-            COUNT(*) FILTER (WHERE status IN ('pending_review', 'awaiting_payment_proof') AND order_type = 'withdrawal') as pending_withdrawals
-        FROM orders
-    """)
+    # Pending approvals using MongoDB
+    pending_statuses = ['pending_review', 'awaiting_payment_proof', 'pending', 'initiated']
+    pending_total = await db.orders.count_documents({"status": {"$in": pending_statuses}})
+    pending_deposits = await db.orders.count_documents({
+        "status": {"$in": pending_statuses},
+        "order_type": {"$in": ["deposit", "wallet_load"]}
+    })
+    pending_withdrawals = await db.orders.count_documents({
+        "status": {"$in": pending_statuses},
+        "order_type": {"$in": ["withdrawal", "wallet_redeem"]}
+    })
     
-    # Today's flow - handle both legacy 'approved' and canonical 'APPROVED_EXECUTED' statuses
-    today_flow = await fetch_one("""
-        SELECT 
-            COALESCE(SUM(amount) FILTER (WHERE order_type = 'deposit' AND status IN ('approved', 'APPROVED_EXECUTED') AND approved_at >= $1), 0) as deposits_in,
-            COALESCE(SUM(payout_amount) FILTER (WHERE order_type = 'withdrawal' AND status IN ('approved', 'APPROVED_EXECUTED') AND approved_at >= $1), 0) as withdrawals_out,
-            COALESCE(SUM(void_amount) FILTER (WHERE status IN ('approved', 'APPROVED_EXECUTED') AND approved_at >= $1), 0) as voided_today
-        FROM orders
-    """, today_start)
+    # Today's flow using MongoDB aggregation
+    approved_statuses = ['approved', 'APPROVED_EXECUTED', 'completed']
     
-    # Total profit calculation - handle both legacy and canonical statuses
-    profit = await fetch_one("""
-        SELECT 
-            COALESCE(SUM(amount) FILTER (WHERE order_type = 'deposit' AND status IN ('approved', 'APPROVED_EXECUTED')), 0) -
-            COALESCE(SUM(payout_amount) FILTER (WHERE order_type = 'withdrawal' AND status IN ('approved', 'APPROVED_EXECUTED')), 0) as net_profit
-        FROM orders
-    """)
+    deposits_pipeline = [
+        {"$match": {
+            "order_type": {"$in": ["deposit", "wallet_load"]},
+            "status": {"$in": approved_statuses},
+            "approved_at": {"$gte": today_start}
+        }},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]
+    deposits_result = await db.orders.aggregate(deposits_pipeline).to_list(1)
+    deposits_in = deposits_result[0]["total"] if deposits_result else 0
+    
+    withdrawals_pipeline = [
+        {"$match": {
+            "order_type": {"$in": ["withdrawal", "wallet_redeem"]},
+            "status": {"$in": approved_statuses},
+            "approved_at": {"$gte": today_start}
+        }},
+        {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$payout_amount", "$amount"]}}}}
+    ]
+    withdrawals_result = await db.orders.aggregate(withdrawals_pipeline).to_list(1)
+    withdrawals_out = withdrawals_result[0]["total"] if withdrawals_result else 0
+    
+    voided_pipeline = [
+        {"$match": {
+            "status": {"$in": approved_statuses},
+            "approved_at": {"$gte": today_start},
+            "void_amount": {"$gt": 0}
+        }},
+        {"$group": {"_id": None, "total": {"$sum": "$void_amount"}}}
+    ]
+    voided_result = await db.orders.aggregate(voided_pipeline).to_list(1)
+    voided_today = voided_result[0]["total"] if voided_result else 0
+    
+    # Total profit calculation
+    all_deposits_pipeline = [
+        {"$match": {"order_type": {"$in": ["deposit", "wallet_load"]}, "status": {"$in": approved_statuses}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]
+    all_deposits_result = await db.orders.aggregate(all_deposits_pipeline).to_list(1)
+    total_deposits = all_deposits_result[0]["total"] if all_deposits_result else 0
+    
+    all_withdrawals_pipeline = [
+        {"$match": {"order_type": {"$in": ["withdrawal", "wallet_redeem"]}, "status": {"$in": approved_statuses}}},
+        {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$payout_amount", "$amount"]}}}}
+    ]
+    all_withdrawals_result = await db.orders.aggregate(all_withdrawals_pipeline).to_list(1)
+    total_withdrawals = all_withdrawals_result[0]["total"] if all_withdrawals_result else 0
+    
+    net_profit = total_deposits - total_withdrawals
     
     # Active clients
-    active_clients = await fetch_one("""
-        SELECT COUNT(*) as count FROM users WHERE is_active = TRUE AND role = 'user'
-    """)
+    active_clients = await db.users.count_documents({"is_active": True, "role": "user"})
     
     # System status
-    system = await fetch_one("SELECT * FROM system_settings WHERE id = 'global'")
+    system = await db.system_settings.find_one({"id": "global"})
     
     return {
         "pending_approvals": {
-            "total": pending['pending_total'],
-            "deposits": pending['pending_deposits'],
-            "withdrawals": pending['pending_withdrawals']
+            "total": pending_total,
+            "deposits": pending_deposits,
+            "withdrawals": pending_withdrawals
         },
         "today": {
-            "deposits_in": round(today_flow['deposits_in'], 2),
-            "withdrawals_out": round(today_flow['withdrawals_out'], 2),
-            "voided": round(today_flow['voided_today'], 2)
+            "deposits_in": round(float(deposits_in or 0), 2),
+            "withdrawals_out": round(float(withdrawals_out or 0), 2),
+            "voided": round(float(voided_today or 0), 2)
         },
-        "net_profit": round(profit['net_profit'], 2),
-        "active_clients": active_clients['count'],
+        "net_profit": round(float(net_profit or 0), 2),
+        "active_clients": active_clients,
         "system_status": {
             "api_enabled": system.get('api_enabled', True) if system else True,
             "telegram_enabled": system.get('telegram_enabled', False) if system else False,
