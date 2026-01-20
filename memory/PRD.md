@@ -101,3 +101,52 @@ Full-stack financial gaming platform with React frontend, FastAPI backend, and M
 
 ### Status: PRODUCTION READY
 No blockers found.
+
+---
+
+## What's Been Implemented (Jan 20, 2026)
+
+### P0: Referral System Fix (MongoDB Migration) ✅
+**Problem**: Referral system was broken after PostgreSQL to MongoDB migration. The backend was using SQL compatibility functions (`fetch_one`, `fetch_all`) that return `None`/`[]` in MongoDB environment.
+
+**Solution**:
+1. **Backend - portal_routes.py**: Rewrote `/portal/referrals/details` endpoint to use native MongoDB aggregation queries
+   - Uses `db.users.count_documents()` for total referrals count
+   - Uses MongoDB aggregation pipelines for active referrals and earnings calculations
+   - Properly returns referral_code, referral_link, commission info, tier system, earnings, and stats
+
+2. **Backend - auth.py**: Rewrote authentication functions to use MongoDB
+   - `resolve_user_from_jwt()`: Uses `db.users.find_one()` instead of SQL
+   - `resolve_user_from_portal_token()`: Uses MongoDB for session lookup
+   - `get_portal_user()` helper: Uses MongoDB for user lookup
+
+3. **Frontend (already working)**: 
+   - `Register.js`: Correctly parses `?ref=CODE` from URL and auto-fills referral input
+   - `ClientReferrals.js`: Displays stats correctly with proper error handling
+
+**Test Results**: 
+- All 13 backend tests passed (100%)
+- All frontend tests passed
+- Full referral flow verified: Create referrer → Get code → Create referred user → Verify count increments
+
+**Key Endpoints**:
+- `POST /api/v1/auth/signup` - Creates user with `referred_by_code` linked to referrer
+- `GET /api/v1/portal/referrals/details` - Returns complete referral stats
+
+**Test Credentials**:
+- Referrer: testref001 / TestPass123! (code: O5037H70)
+- Referred: referreduser01 / TestPass123!
+
+---
+
+## Backlog / Future Tasks
+
+### P1: Complete PostgreSQL to MongoDB Migration
+- Many other backend routes still use SQL compatibility functions
+- Audit all files using `fetch_one`, `fetch_all`, `execute`, `pool.acquire`
+- Convert to native MongoDB queries
+
+### P2: Referral Earnings Tracking
+- Implement earnings tracking when referred users make deposits
+- Add earnings history to referrals page
+
