@@ -29,14 +29,14 @@ Successfully set up and configured the gaming platform with separate login flows
 ## 🔗 External Testing Links
 
 ### Production URLs (Based on .env configuration)
-Base URL: `https://finplay-admin.preview.emergentagent.com`
+Base URL: `https://mongogames-ref.preview.emergentagent.com`
 
 | Purpose | URL | Has Signup? |
 |---------|-----|-------------|
-| **Client Login** | `https://finplay-admin.preview.emergentagent.com/login` | ✅ Yes |
-| **Admin Login** | `https://finplay-admin.preview.emergentagent.com/admin/login` | ❌ No |
-| **Public Games** | `https://finplay-admin.preview.emergentagent.com/games` | N/A (Public) |
-| **Register** | `https://finplay-admin.preview.emergentagent.com/register` | - |
+| **Client Login** | `https://mongogames-ref.preview.emergentagent.com/login` | ✅ Yes |
+| **Admin Login** | `https://mongogames-ref.preview.emergentagent.com/admin/login` | ❌ No |
+| **Public Games** | `https://mongogames-ref.preview.emergentagent.com/games` | N/A (Public) |
+| **Register** | `https://mongogames-ref.preview.emergentagent.com/register` | - |
 
 ---
 

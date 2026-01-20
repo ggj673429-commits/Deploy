@@ -1,0 +1,162 @@
+<analysis>
+Here is a summary of the work done and the current status of the project.
+
+**original_problem_statement:**
+The user initially wanted to deploy their Gaming Platform application. After several deployment attempts failed due to the application's use of PostgreSQL on the MongoDB-native Emergent platform, the user agreed to migrate the database to MongoDB. The migration process has been a multi-step debugging and refactoring effort.
+
+The most recent request from the user is to fix the referral system, which is currently broken after the database migration.
+
+**PRODUCT REQUIREMENTS:**
+1.  When a new user signs up using a referral code/link, the referrer’s “Total Referrals” count must increase.
+2.  The  page on the frontend should correctly display the referral statistics.
+3.  The registration page should auto-fill the referral code from a URL query parameter ().
+4.  The backend must correctly link a new user to their referrer in the MongoDB database upon signup.
+5.  API error handling on the frontend should be clear and not show misleading information (e.g., showing '0' referrals when the API call fails).
+
+**User's preferred language**:
+The user's primary language is English. The next agent MUST respond in English.
+
+**what currently exists?**
+The project is a full-stack gaming platform with a React frontend and a FastAPI backend. The application was originally built with a PostgreSQL database but has been partially migrated to MongoDB to enable deployment on the Emergent platform. This migration is the primary source of bugs. Key authentication and login flows have been fixed to work with MongoDB, but other features, like the referral system, still contain legacy SQL code and are non-functional.
+
+**Last working item**:
+The agent was in the initial analysis phase of fixing the broken referral system as per the user's detailed instructions.
+
+*   **Last item agent was working:** Analyzing the user's request to fix the referral system and inspecting the relevant files (, , and ) to understand the scope of the required changes.
+*   **Status:** NOT STARTED
+*   **Agent Testing Done:** N
+*   **Which testing method agent to use?** Both. The frontend agent should be used to test the UI changes on the registration and referrals pages. The backend should be tested via  or  to verify the API logic for creating users with referrals and fetching referral stats.
+*   **User Testing Done:** N
+
+**All Pending/In progress Issue list**:
+*   **Issue 1 (P0):** The referral system is broken. The referrer's Total Referrals count does not update when a new user signs up with their code.
+
+    *   **Issues Detail:**
+        *   **Issue 1: Broken Referral System**
+            *   **Attempted fixes:** None. The work is yet to begin.
+            *   **Next debug checklist:**
+                1.  Implement the frontend and backend fixes as detailed in the Upcoming and Future Tasks section below.
+                2.  Start with  to fix the  endpoint, rewriting the SQL queries to MongoDB.
+                3.  Modify  to correctly process the  during user creation.
+                4.  Update  to handle the  query parameter and send the correct  field in the payload.
+                5.  Fix  to show proper error messages instead of masking API failures.
+            *   **Why fix this issue and what will be achieved with the fix?** Fixing this will make a core business feature of the application functional, allowing users to refer others and track their referrals, which is essential for user growth.
+            *   **Status:** NOT STARTED
+            *   **Is recurring issue?** N
+            *   **Should Test frontend/backend/both after fix?** Both
+            *   **Blocked on other issue:** None
+
+**In progress Task List**:
+There are no tasks currently in progress. The previous tasks related to login fixes and deployment debugging have been completed.
+
+**Upcoming and Future Tasks**
+The following is a prioritized list of tasks required to fix the referral system, based on the user's last request.
+
+*   **Upcoming Tasks (P0):**
+    *   **Backend - Task 1:** Rewrite the  endpoint in  to use native MongoDB queries instead of the failing SQL helpers ().
+    *   **Backend - Task 2:** In , ensure the  function correctly looks up the referrer by , normalizes the code (trim/uppercase), and stores the linkage () for the new user.
+    *   **Frontend - Task 3:** In , parse the  query parameter from the URL, auto-fill the referral input, and update the signup payload to send  (not ).
+    *   **Frontend - Task 4:** In , remove the logic that shows hardcoded zeros on API failure and instead display a user-friendly error message.
+
+*   **Future Tasks (P1):**
+    *   **Backend - Task 5 (Optional):** Review and clean up . Disable or rewrite any remaining SQL-based endpoints to prevent future issues.
+    *   **Backend - Full Migration:** Systematically refactor all remaining backend services and routes to remove the SQL compatibility layer and use MongoDB queries directly. This will resolve significant technical debt.
+
+**Completed work in this session**
+*   **Login Flow End-to-End Fix:**
+    *   Resolved Session Expired errors by converting authentication services () to use native MongoDB queries instead of the broken SQL compatibility layer.
+    *   Standardized API response schemas for  and .
+    *   Improved frontend token persistence () and error handling ().
+*   **Deployment Debugging:**
+    *   Identified and fixed numerous silent backend crashes caused by missing Python dependencies (, , ) and leftover PostgreSQL imports ().
+    *   Commented out a call to a PostgreSQL-specific function () in  that was blocking application startup.
+*   **Chatwoot Webhook Integration:**
+    *   Added a new endpoint  to receive alerts from Chatwoot and forward them to a Telegram channel.
+*   **Games API Configuration:**
+    *   Added missing environment variables for the Games API integration to  and .
+
+**Earlier issues found/mentioned but not fixed**
+*   **Issue 1: Incomplete PostgreSQL to MongoDB Migration**
+    *   **Debug checklist:** The agent has been tackling this piece by piece. A full audit is needed to identify all files that still use the SQL compatibility functions (, , , ). A good starting point is to  for these function calls across the  directory.
+    *   **Why to solve this issue and what will be achieved with this?** This is the root cause of most bugs in the application. Completing the migration will improve stability, remove technical debt, and prevent future runtime errors.
+    *   **Should Test frontend/backend/both after fix:** Backend
+    *   **Is recurring issue?** Y
+
+**Known issue recurrence from previous fork**
+- N/A
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+*   **Backend:** FastAPI, MongoDB ( async driver), Pydantic, JWT authentication.
+*   **Frontend:** React (Create React App with CRACO), Axios, Tailwind CSS, React Router.
+*   **Database:** MongoDB. A compatibility layer in  exists to mock old PostgreSQL functions, but it is a source of bugs.
+
+**key DB schema**
+*   **users:** 
+*   **orders:** (Schema not fully inspected, but relevant for active referrals and rewards). Contains fields like  ('APPROVED').
+
+**changes in tech stack**
+*   **Database Migration:** The application is in a transitional state, having been moved from **PostgreSQL** to **MongoDB**. This is the most critical context for the next agent.
+
+**All files of reference**
+*   **Files for Referral Fix:**
+    *   : Needs to handle  query param and fix payload field name.
+    *   : Needs improved error handling for the stats API.
+    *   : The  endpoint needs to be rewritten for MongoDB.
+    *   : The  function needs to correctly handle referral linkage.
+*   **Key System Files:**
+    *   : Contains the fragile PostgreSQL-to-MongoDB compatibility layer.
+    *   : Main application entry point with startup/shutdown events.
+
+**Areas that need refactoring**:
+The entire backend data access layer needs to be refactored to remove the PostgreSQL compatibility functions (, , etc.) and use native  MongoDB queries. This technical debt is the primary cause of instability.
+
+**key api endpoints**
+*   : User registration endpoint.
+*   : User login endpoint.
+*   : Validates a user's JWT.
+*   : Fetches referral stats for the logged-in user. (Currently broken).
+
+**Critical Info for New Agent**
+*   **The application is in a partially migrated state from PostgreSQL to MongoDB.** This is the root cause of the current task and many previous bugs. Do not trust any code that uses SQL-like functions such as , , or . They are part of a fragile compatibility layer and likely do not work as expected.
+*   The immediate goal is to fix the referral system. The user has provided a detailed, step-by-step guide. **You must follow the user's instructions from message #370 precisely.**
+*   Fixes will involve rewriting SQL-based logic in  and  to use native MongoDB queries via the  driver.
+
+**documents and test reports created in this job**
+Numerous documentation and report files were generated during previous debugging sessions (e.g., , ). These are likely outdated and should be used with caution.
+
+**Last 10 User Messages and any pending HUMAN messages**
+1.  **fix the referral system... (Pending)**: User provided detailed instructions to fix the broken referral system. This is the current active task.
+2.  **Fix the login failures end-to-end... (Completed)**: User provided detailed instructions to fix login issues, which the agent completed.
+3.  **its telling session expires... (Completed)**: User reported login issues, which were resolved.
+4.  **caheck all the issue cdthats causing deployment failes right now (Completed)**: User requested a check for deployment failures, which the agent addressed.
+5.  **Also check if the connection between chatwoot... (Completed)**: User asked to verify the Games API integration, and the agent added the necessary environment variables.
+6.  **Use deployment agent... (multiple times) (Completed)**: User provided deployment logs, which the agent analyzed and fixed.
+7.  **change the database to mongodb... (In Progress)**: User approved the database migration. The core parts are done, but the full migration is ongoing.
+8.  **do it on railway pls (Superseded)**: User initially wanted Railway deployment but later switched to Emergent deployment, necessitating the DB migration.
+9.  **just add endpoints and api on out r code not chatwoot... (Completed)**: User clarified the request to add a Chatwoot webhook receiver to the gaming app.
+10. **B, vcan you deploy fro. here urself? (Superseded)**: User initially chose external deployment before switching to Emergent deployment.
+
+**Project Health Check:**
+*   **Broken:** The referral system is completely broken. Many other backend routes that haven't been explicitly fixed are also likely broken due to the incomplete database migration.
+*   **Mocked:** The database access layer in  is a mock compatibility layer that is the source of significant instability.
+
+**3rd Party Integrations**
+*   **Telegram:** Used for sending notifications.
+*   **Chatwoot:** Integrated via a webhook to receive alerts.
+*   **Games API:** An external API for core game logic, configured via environment variables.
+
+**Testing status**
+*   **Testing agent used after significant changes:** NO
+*   **Troubleshoot agent used after agent stuck in loop:** NO
+*   **Test files created:** None.
+*   **Known regressions:** The referral system broke as a regression from the PostgreSQL to MongoDB migration.
+
+**Credentials to test flow:**
+None provided. The agent will need to use the application's signup feature to create accounts for testing the referral flow.
+
+**What agent forgot to execute**
+The agent has not yet started the implementation of the user's most recent and detailed request: to fix the referral system. The entire set of tasks outlined by the user in chat message #370 is pending.
+</analysis>
